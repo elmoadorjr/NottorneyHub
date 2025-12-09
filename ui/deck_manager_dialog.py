@@ -6,7 +6,7 @@ Shows purchased decks and allows downloading them
 from aqt.qt import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QListWidget, QListWidgetItem, QMessageBox,
-    QProgressDialog
+    QProgressDialog, Qt
 )
 from aqt import mw
 from ..api_client import api, NottorneyAPIError
@@ -100,7 +100,7 @@ class DeckManagerDialog(QDialog):
                     status = f"Available (v{deck_version})"
                 
                 item.setText(f"{deck_title}\n{status}")
-                item.setData(1, deck)  # Store deck data
+                item.setData(Qt.ItemDataRole.UserRole, deck)  # Store deck data
                 
                 self.deck_list.addItem(item)
         
@@ -127,7 +127,7 @@ class DeckManagerDialog(QDialog):
             return
         
         item = selected_items[0]
-        deck = item.data(1)
+        deck = item.data(Qt.ItemDataRole.UserRole)
         
         deck_id = deck.get('id')
         deck_title = deck.get('title', 'Unknown Deck')
@@ -149,7 +149,7 @@ class DeckManagerDialog(QDialog):
         # Show progress dialog
         progress = QProgressDialog("Downloading deck...", "Cancel", 0, 0, self)
         progress.setWindowTitle("Downloading")
-        progress.setWindowModality(1)  # Qt.WindowModal
+        progress.setWindowModality(Qt.WindowModality.WindowModal)  # Fixed: Use Qt enum
         progress.show()
         
         try:
