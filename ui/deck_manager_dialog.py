@@ -1,5 +1,5 @@
 """
-Deck manager dialog UI for the Ottorney addon
+Deck manager dialog UI for the Nottorney addon
 Shows purchased decks and allows downloading them
 """
 
@@ -9,7 +9,7 @@ from aqt.qt import (
     QProgressDialog
 )
 from aqt import mw
-from ..api_client import api, OttorneyAPIError
+from ..api_client import api, NottorneyAPIError
 from ..config import config
 from ..deck_importer import import_deck
 
@@ -19,7 +19,7 @@ class DeckManagerDialog(QDialog):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Ottorney Deck Manager")
+        self.setWindowTitle("Nottorney Deck Manager")
         self.setMinimumSize(600, 400)
         self.decks = []
         self.setup_ui()
@@ -104,7 +104,7 @@ class DeckManagerDialog(QDialog):
                 
                 self.deck_list.addItem(item)
         
-        except OttorneyAPIError as e:
+        except NottorneyAPIError as e:
             self.info_label.setText(f"Error: {str(e)}")
             QMessageBox.warning(self, "Error", f"Failed to load decks: {str(e)}")
         
@@ -159,7 +159,7 @@ class DeckManagerDialog(QDialog):
             
             download_url = download_info.get('download_url')
             if not download_url:
-                raise OttorneyAPIError("No download URL provided")
+                raise NottorneyAPIError("No download URL provided")
             
             # Download the deck file
             progress.setLabelText("Downloading deck file...")
@@ -183,7 +183,7 @@ class DeckManagerDialog(QDialog):
             # Refresh the list
             self.load_decks()
         
-        except OttorneyAPIError as e:
+        except NottorneyAPIError as e:
             progress.close()
             QMessageBox.warning(self, "Error", f"Download failed: {str(e)}")
         

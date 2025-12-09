@@ -64,47 +64,51 @@ def get_review_stats_for_deck(deck_id: int, days: int = 30) -> dict:
     Returns:
         Dictionary with review statistics
     """
-    # Calculate the timestamp for X days ago
-    cutoff_time = int((datetime.now() - timedelta(days=days)).timestamp() * 1000)
-    
-    # Get card IDs for the deck
-    card_ids = mw.col.decks.cids(deck_id, children=True)
-    
-    if not card_ids:
+    try:
+        # Calculate the timestamp for X days ago
+        cutoff_time = int((datetime.now() - timedelta(days=days)).timestamp() * 1000)
+        
+        # Get card IDs for the deck
+        card_ids = mw.col.decks.cids(deck_id, children=True)
+        
+        if not card_ids:
+            return {}
+        
+        # Query the review log
+        card_ids_str = ",".join(str(cid) for cid in card_ids)
+        
+        query = f"""
+            SELECT 
+                COUNT(*) as total_reviews,
+                SUM(CASE WHEN type = 0 THEN 1 ELSE 0 END) as new_cards,
+                AVG(ease) as average_ease,
+                SUM(time) / 60000 as study_time_minutes,
+                MAX(id) as last_review_id
+            FROM revlog
+            WHERE cid IN ({card_ids_str})
+            AND id >= {cutoff_time}
+        """
+        
+        result = mw.col.db.first(query)
+        
+        if not result:
+            return {}
+        
+        # Get last study date from the last review ID
+        last_study_date = None
+        if result[4]:  # last_review_id
+            last_study_date = datetime.fromtimestamp(result[4] / 1000).isoformat()
+        
+        return {
+            'total_reviews': result[0] or 0,
+            'new_cards': result[1] or 0,
+            'average_ease': round(result[2] or 0, 2),
+            'study_time_minutes': round(result[3] or 0, 2),
+            'last_study_date': last_study_date
+        }
+    except Exception as e:
+        print(f"Error getting review stats: {e}")
         return {}
-    
-    # Query the review log
-    card_ids_str = ",".join(str(cid) for cid in card_ids)
-    
-    query = f"""
-        SELECT 
-            COUNT(*) as total_reviews,
-            SUM(CASE WHEN type = 0 THEN 1 ELSE 0 END) as new_cards,
-            AVG(ease) as average_ease,
-            SUM(time) / 60000 as study_time_minutes,
-            MAX(id) as last_review_id
-        FROM revlog
-        WHERE cid IN ({card_ids_str})
-        AND id >= {cutoff_time}
-    """
-    
-    result = mw.col.db.first(query)
-    
-    if not result:
-        return {}
-    
-    # Get last study date from the last review ID
-    last_study_date = None
-    if result[4]:  # last_review_id
-        last_study_date = datetime.fromtimestamp(result[4] / 1000).isoformat()
-    
-    return {
-        'total_reviews': result[0] or 0,
-        'new_cards': result[1] or 0,
-        'average_ease': round(result[2] or 0, 2),
-        'study_time_minutes': round(result[3] or 0, 2),
-        'last_study_date': last_study_date
-    }
 
 
 def sync_progress():
@@ -119,9 +123,11 @@ def sync_progress():
     
     if not progress_data:
         # No decks to sync
-        return
+        print("No decks to sync")
+        return None
     
     # Send to server
+    print(f"Syncing progress for {len(progress_data)} deck(s)")
     result = api.sync_progress(progress_data)
     
     return result
@@ -152,4 +158,4 @@ def auto_sync_if_needed():
     except Exception as e:
         # Silently fail for auto-sync
         # You can log this if you implement logging
-        pass
+        print(f"Auto-sync failed: {e}")

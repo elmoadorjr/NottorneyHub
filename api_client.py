@@ -28,7 +28,11 @@ class NottorneyAPI:
         if include_auth:
             # Check if token is expired and refresh if needed
             if config.is_token_expired():
-                self.refresh_token()
+                try:
+                    self.refresh_token()
+                except Exception as e:
+                    print(f"Token refresh failed: {e}")
+                    # Don't clear tokens here, let the user try again
             
             access_token = config.get_access_token()
             if access_token:
@@ -62,6 +66,8 @@ class NottorneyAPI:
                 error_data = e.response.json()
                 if 'message' in error_data:
                     error_msg = error_data['message']
+                elif 'error' in error_data:
+                    error_msg = error_data['error']
             except:
                 pass
             raise NottorneyAPIError(error_msg)
@@ -89,6 +95,7 @@ class NottorneyAPI:
                 result['expires_at']
             )
             config.save_user(result['user'])
+            print(f"Login successful, token expires at: {result['expires_at']}")
         
         return result
     
@@ -105,6 +112,7 @@ class NottorneyAPI:
             'refresh_token': refresh_token
         }
         
+        print(f"Attempting to refresh token...")
         result = self._make_request('POST', '/addon-refresh-token', data)
         
         if result.get('success'):
@@ -114,6 +122,7 @@ class NottorneyAPI:
                 result['refresh_token'],
                 result['expires_at']
             )
+            print(f"Token refreshed successfully, expires at: {result['expires_at']}")
         
         return result
     
