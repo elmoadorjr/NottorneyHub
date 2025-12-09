@@ -13,21 +13,21 @@ class Config:
     """Manages addon configuration and authentication state"""
     
     def __init__(self):
-        # Get the actual addon folder name dynamically
-        # This will work regardless of whether it's "Nottorney_Addon", etc.
-        addon_path = os.path.dirname(os.path.dirname(__file__))
-        self.addon_name = os.path.basename(addon_path)
+        # Use the package name from manifest.json instead of dynamic detection
+        self.addon_name = "Nottorney_Addon"
         
     def _get_config(self):
         """Get the addon config from Anki"""
         try:
             config = mw.addonManager.getConfig(self.addon_name)
             if config is None:
+                print(f"Config is None for {self.addon_name}, using defaults")
                 # Return default config if none exists
                 return self._get_default_config()
             return config
-        except Exception:
+        except Exception as e:
             # If there's any error reading config, return defaults
+            print(f"Error reading config for {self.addon_name}: {e}")
             return self._get_default_config()
     
     def _get_default_config(self):
@@ -47,10 +47,13 @@ class Config:
         """Save the addon config to Anki"""
         try:
             mw.addonManager.writeConfig(self.addon_name, data)
+            print(f"Config saved successfully for {self.addon_name}")
+            return True
         except Exception as e:
             # If saving fails, we'll just continue
             # The config will be lost but the addon won't crash
-            print(f"Warning: Failed to save config: {e}")
+            print(f"ERROR: Failed to save config for {self.addon_name}: {e}")
+            return False
     
     # Authentication
     def save_tokens(self, access_token, refresh_token, expires_at):
@@ -59,15 +62,29 @@ class Config:
         cfg['access_token'] = access_token
         cfg['refresh_token'] = refresh_token
         cfg['expires_at'] = expires_at
-        self._save_config(cfg)
+        success = self._save_config(cfg)
+        if success:
+            print(f"Tokens saved: expires_at={expires_at}")
+        else:
+            print("WARNING: Tokens may not have been saved properly")
     
     def get_access_token(self):
         """Get the current access token"""
-        return self._get_config().get('access_token')
+        token = self._get_config().get('access_token')
+        if token:
+            print("Access token found")
+        else:
+            print("No access token found")
+        return token
     
     def get_refresh_token(self):
         """Get the current refresh token"""
-        return self._get_config().get('refresh_token')
+        token = self._get_config().get('refresh_token')
+        if token:
+            print("Refresh token found")
+        else:
+            print("No refresh token found")
+        return token
     
     def get_token_expiry(self):
         """Get the token expiration timestamp"""
@@ -80,8 +97,10 @@ class Config:
             print("No expiry timestamp found")
             return True
         
+        # Add 5 minute buffer to avoid edge cases
         current_time = datetime.now().timestamp()
-        is_expired = current_time >= expires_at
+        buffer_seconds = 300  # 5 minutes
+        is_expired = current_time >= (expires_at - buffer_seconds)
         
         if is_expired:
             print(f"Token expired: current={current_time}, expires={expires_at}")
@@ -94,15 +113,21 @@ class Config:
     def clear_tokens(self):
         """Clear all authentication tokens"""
         cfg = self._get_config()
-        cfg.pop('access_token', None)
-        cfg.pop('refresh_token', None)
-        cfg.pop('expires_at', None)
-        cfg.pop('user', None)
-        self._save_config(cfg)
+        cfg['access_token'] = None
+        cfg['refresh_token'] = None
+        cfg['expires_at'] = None
+        cfg['user'] = None
+        success = self._save_config(cfg)
+        if success:
+            print("Tokens cleared successfully")
+        else:
+            print("WARNING: Tokens may not have been cleared properly")
     
     def is_logged_in(self):
         """Check if user is logged in"""
-        return bool(self.get_access_token())
+        has_token = bool(self.get_access_token())
+        print(f"Is logged in: {has_token}")
+        return has_token
     
     # User data
     def save_user(self, user_data):
@@ -110,6 +135,7 @@ class Config:
         cfg = self._get_config()
         cfg['user'] = user_data
         self._save_config(cfg)
+        print(f"User saved: {user_data.get('email', 'unknown')}")
     
     def get_user(self):
         """Get saved user information"""
