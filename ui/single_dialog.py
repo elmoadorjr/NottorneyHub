@@ -1,5 +1,5 @@
 """
-Minimalist Nottorney Dialog - FULLY INTEGRATED
+Minimalist Nottorney Dialog - FULLY INTEGRATED - FIXED DECK TRACKING
 LESS IS BEST - Single dialog for all operations with actual API integration
 """
 
@@ -419,43 +419,57 @@ class MinimalNottorneyDialog(QDialog):
             self.log("Logged out")
             self.check_login()
     
+    def clean_deleted_decks(self):
+        """
+        Remove tracking for decks that no longer exist in Anki
+        Returns the number of decks cleaned up
+        """
+        downloaded_decks = config.get_downloaded_decks()
+        decks_to_remove = []
+        
+        self.log(f"Checking {len(downloaded_decks)} tracked deck(s)...")
+        
+        for deck_id, deck_info in downloaded_decks.items():
+            anki_deck_id = deck_info.get('anki_deck_id')
+            
+            if not anki_deck_id:
+                self.log(f"Deck {deck_id} has no Anki ID - marking for removal")
+                decks_to_remove.append(deck_id)
+                continue
+            
+            if not self.deck_exists_in_anki(anki_deck_id):
+                self.log(f"Deck {deck_id} (Anki ID: {anki_deck_id}) no longer exists - marking for removal")
+                decks_to_remove.append(deck_id)
+        
+        # Remove the deleted decks from tracking
+        for deck_id in decks_to_remove:
+            success = config.remove_downloaded_deck(deck_id)
+            if success:
+                self.log(f"✓ Removed {deck_id} from tracking")
+            else:
+                self.log(f"✗ Failed to remove {deck_id}")
+        
+        return len(decks_to_remove)
+    
     def load_deck_status(self):
         """Load and display deck status - minimal"""
         try:
             self.status_label.setText("⏳ Loading decks...")
             self.log("Fetching purchased decks...")
             
+            # CRITICAL: Clean up deleted decks FIRST before loading anything
+            self.log("Checking for deleted decks in Anki...")
+            deleted_count = self.clean_deleted_decks()
+            
+            if deleted_count > 0:
+                self.log(f"✓ Cleaned up {deleted_count} deleted deck(s)")
+            else:
+                self.log("No deleted decks found")
+            
             self.decks = api.get_purchased_decks()
             downloaded_decks = config.get_downloaded_decks()
             
             total = len(self.decks)
-            
-            # Clean up deleted decks first
-            self.log("Checking for deleted decks...")
-            deleted_count = 0
-            
-            # Get a fresh copy to iterate over
-            decks_snapshot = list(downloaded_decks.items())
-            
-            for deck_id, deck_info in decks_snapshot:
-                anki_deck_id = deck_info.get('anki_deck_id')
-                if anki_deck_id:
-                    if not self.deck_exists_in_anki(anki_deck_id):
-                        self.log(f"Deck no longer exists in Anki: {deck_id} (Anki ID: {anki_deck_id})")
-                        success = config.remove_downloaded_deck(deck_id)
-                        if success:
-                            deleted_count += 1
-                            self.log(f"✓ Removed from tracking: {deck_id}")
-                        else:
-                            self.log(f"✗ Failed to remove: {deck_id}")
-            
-            if deleted_count > 0:
-                self.log(f"✓ Cleaned up {deleted_count} deleted deck(s)")
-                # Reload config after cleanup
-                downloaded_decks = config.get_downloaded_decks()
-                self.log(f"Remaining tracked decks: {len(downloaded_decks)}")
-            else:
-                self.log("No deleted decks found")
             
             # Count new and updated decks
             new = 0
