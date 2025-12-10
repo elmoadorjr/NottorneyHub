@@ -11,6 +11,7 @@ from aqt.utils import showInfo
 try:
     from .ui.login_dialog import LoginDialog
     from .ui.deck_manager_dialog import DeckManagerDialog
+    from .ui.sync_dialog import SyncDialog
     from .config import config
     from . import sync
     from .api_client import api
@@ -79,8 +80,23 @@ def show_login():
         update_menu()
 
 
+def show_sync_decks():
+    """Show the auto-sync dialog for one-click deck syncing"""
+    print("=== Opening Sync Decks Dialog ===")
+    
+    if not ensure_valid_token():
+        print("Token validation failed, showing login")
+        showInfo("Your session has expired. Please login again.")
+        show_login()
+        return
+    
+    print("Token valid, opening sync dialog")
+    dialog = SyncDialog(mw)
+    dialog.exec()
+
+
 def show_deck_manager():
-    """Show the deck manager dialog"""
+    """Show the deck manager dialog (for advanced users)"""
     print("=== Opening Deck Manager ===")
     
     if not ensure_valid_token():
@@ -148,15 +164,23 @@ def update_menu():
             nottorney_menu.addAction(user_label)
             nottorney_menu.addSeparator()
         
-        # Manage Decks action
-        manage_action = QAction("📚 Manage Decks", mw)
+        # Sync Decks action (PRIMARY - for ease of use)
+        sync_decks_action = QAction("🔄 Sync My Decks", mw)
+        sync_decks_action.triggered.connect(show_sync_decks)
+        sync_decks_action.setToolTip("Automatically download all your purchased decks")
+        nottorney_menu.addAction(sync_decks_action)
+        
+        # Manage Decks action (SECONDARY - for advanced users)
+        manage_action = QAction("📚 Browse & Download", mw)
         manage_action.triggered.connect(show_deck_manager)
+        manage_action.setToolTip("Browse and selectively download decks")
         nottorney_menu.addAction(manage_action)
         
         # Sync Progress action
-        sync_action = QAction("🔄 Sync Progress", mw)
-        sync_action.triggered.connect(on_sync_progress)
-        nottorney_menu.addAction(sync_action)
+        sync_progress_action = QAction("📊 Sync Study Progress", mw)
+        sync_progress_action.triggered.connect(on_sync_progress)
+        sync_progress_action.setToolTip("Upload your study progress to Nottorney")
+        nottorney_menu.addAction(sync_progress_action)
         
         nottorney_menu.addSeparator()
         
@@ -183,7 +207,7 @@ def show_about():
     showInfo(
         f"<h2>Nottorney for Anki</h2>"
         f"<p>Version {ADDON_VERSION}</p>"
-        f"<p>Manage and sync your Nottorney flashcard decks.</p>"
+        f"<p>Automatically sync your Nottorney flashcard decks.</p>"
         f"<p><b>Please login to access your purchased decks.</b></p>"
         f"<br>"
         f"<p>Visit: <a href='https://nottorney.lovable.app'>nottorney.lovable.app</a></p>"
