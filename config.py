@@ -1,6 +1,7 @@
 """
 Configuration management for the Nottorney addon
 Handles storing and retrieving tokens, settings, etc.
+NOW WITH UI MODE PREFERENCE SUPPORT
 """
 
 from aqt import mw
@@ -50,7 +51,8 @@ class Config:
             "access_token": None,
             "refresh_token": None,
             "expires_at": None,
-            "user": None
+            "user": None,
+            "ui_mode": "minimal"  # NEW: "minimal" or "classic"
         }
     
     def _save_config(self, data):
@@ -78,7 +80,40 @@ class Config:
         self._config_cache = None
         self._cache_timestamp = 0
     
-    # Authentication
+    # === UI MODE PREFERENCE (NEW) ===
+    
+    def get_ui_mode(self):
+        """
+        Get the user's preferred UI mode
+        Returns: "minimal" or "classic"
+        """
+        mode = self._get_config().get('ui_mode', 'minimal')
+        if mode not in ['minimal', 'classic']:
+            mode = 'minimal'
+        return mode
+    
+    def set_ui_mode(self, mode):
+        """
+        Set the user's preferred UI mode
+        Args:
+            mode: "minimal" or "classic"
+        """
+        if mode not in ['minimal', 'classic']:
+            print(f"Warning: Invalid UI mode '{mode}', using 'minimal'")
+            mode = 'minimal'
+        
+        cfg = self._get_config()
+        cfg['ui_mode'] = mode
+        
+        success = self._save_config(cfg)
+        
+        if success:
+            print(f"UI mode set to: {mode}")
+        
+        return success
+    
+    # === AUTHENTICATION ===
+    
     def save_tokens(self, access_token, refresh_token, expires_at):
         """Save authentication tokens"""
         cfg = self._get_config()
@@ -166,7 +201,8 @@ class Config:
         has_token = bool(self.get_access_token())
         return has_token
     
-    # User data
+    # === USER DATA ===
+    
     def save_user(self, user_data):
         """Save user information"""
         if not user_data:
@@ -188,7 +224,8 @@ class Config:
         """Get saved user information"""
         return self._get_config().get('user')
     
-    # API settings
+    # === API SETTINGS ===
+    
     def get_api_url(self):
         """Get the API base URL"""
         url = self._get_config().get('api_url', 
@@ -208,7 +245,8 @@ class Config:
         
         return self._save_config(cfg)
     
-    # Downloaded decks tracking
+    # === DOWNLOADED DECKS TRACKING ===
+    
     def save_downloaded_deck(self, deck_id, version, anki_deck_id):
         """Track a downloaded deck"""
         if not deck_id:
@@ -284,7 +322,8 @@ class Config:
         
         return True
     
-    # Auto-sync settings
+    # === AUTO-SYNC SETTINGS ===
+    
     def get_auto_sync_enabled(self):
         """Check if auto-sync is enabled"""
         return self._get_config().get('auto_sync_enabled', True)

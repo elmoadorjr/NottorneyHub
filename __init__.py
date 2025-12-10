@@ -1,6 +1,6 @@
 """
 Nottorney Anki Addon
-Main entry point for the addon
+Main entry point with MINIMALIST dialog option
 """
 
 from aqt import mw, gui_hooks
@@ -12,6 +12,7 @@ try:
     from .ui.login_dialog import LoginDialog
     from .ui.deck_manager_dialog import DeckManagerDialog
     from .ui.sync_dialog import SyncDialog
+    from .ui.single_dialog import MinimalNottorneyDialog  # NEW
     from .config import config
     from . import sync
     from .api_client import api
@@ -31,6 +32,10 @@ except ImportError as e:
 # Addon metadata
 ADDON_NAME = "Nottorney"
 ADDON_VERSION = "1.0.0"
+
+# UI Mode Setting - Choose your preferred interface style
+# Options: "minimal", "classic", "auto-sync"
+UI_MODE = config.get_ui_mode() if hasattr(config, 'get_ui_mode') else "minimal"
 
 # Global menu reference
 nottorney_menu = None
@@ -65,8 +70,15 @@ def ensure_valid_token():
     return True
 
 
+def show_minimal_dialog():
+    """Show the minimalist single-dialog interface (RECOMMENDED)"""
+    print("=== Opening Minimal Dialog ===")
+    dialog = MinimalNottorneyDialog(mw)
+    dialog.exec()
+
+
 def show_login():
-    """Show the login dialog"""
+    """Show the login dialog (CLASSIC)"""
     dialog = LoginDialog(mw)
     if dialog.exec():
         user = config.get_user()
@@ -76,12 +88,11 @@ def show_login():
         else:
             showInfo("Login successful!")
         
-        # Update menu after successful login
         update_menu()
 
 
 def show_sync_decks():
-    """Show the auto-sync dialog for one-click deck syncing"""
+    """Show the auto-sync dialog for one-click deck syncing (CLASSIC)"""
     print("=== Opening Sync Decks Dialog ===")
     
     if not ensure_valid_token():
@@ -96,7 +107,7 @@ def show_sync_decks():
 
 
 def show_deck_manager():
-    """Show the deck manager dialog (for advanced users)"""
+    """Show the deck manager dialog (CLASSIC - for advanced users)"""
     print("=== Opening Deck Manager ===")
     
     if not ensure_valid_token():
@@ -137,13 +148,31 @@ def logout():
     print("=== Logging out ===")
     config.clear_tokens()
     showInfo("Logged out successfully")
-    
-    # Update menu after logout
+    update_menu()
+
+
+def switch_to_minimal_mode():
+    """Switch to minimal UI mode"""
+    global UI_MODE
+    UI_MODE = "minimal"
+    if hasattr(config, 'set_ui_mode'):
+        config.set_ui_mode("minimal")
+    showInfo("Switched to Minimal Mode! 🎯\n\nReopen Nottorney to use the simplified interface.")
+    update_menu()
+
+
+def switch_to_classic_mode():
+    """Switch to classic UI mode"""
+    global UI_MODE
+    UI_MODE = "classic"
+    if hasattr(config, 'set_ui_mode'):
+        config.set_ui_mode("classic")
+    showInfo("Switched to Classic Mode! 📚\n\nReopen Nottorney to use the full-featured interface.")
     update_menu()
 
 
 def update_menu():
-    """Update the menu based on login state"""
+    """Update the menu based on login state and UI mode"""
     global nottorney_menu
     
     if nottorney_menu is None:
@@ -154,23 +183,40 @@ def update_menu():
     
     is_logged_in = config.is_logged_in()
     
+    # === MINIMAL MODE ===
+    if UI_MODE == "minimal":
+        # Just one action - open the minimal dialog
+        main_action = QAction("🎯 Open Nottorney", mw)
+        main_action.triggered.connect(show_minimal_dialog)
+        nottorney_menu.addAction(main_action)
+        
+        nottorney_menu.addSeparator()
+        
+        # Switch to classic mode option
+        switch_action = QAction("📚 Switch to Classic Mode", mw)
+        switch_action.triggered.connect(switch_to_classic_mode)
+        nottorney_menu.addAction(switch_action)
+        
+        return
+    
+    # === CLASSIC MODE ===
     if is_logged_in:
         # Show logged-in menu options
         user = config.get_user()
         if user:
             email = user.get('email', 'User')
             user_label = QAction(f"👤 {email}", mw)
-            user_label.setEnabled(False)  # Make it non-clickable
+            user_label.setEnabled(False)
             nottorney_menu.addAction(user_label)
             nottorney_menu.addSeparator()
         
-        # Sync Decks action (PRIMARY - for ease of use)
+        # Sync Decks action (PRIMARY)
         sync_decks_action = QAction("🔄 Sync My Decks", mw)
         sync_decks_action.triggered.connect(show_sync_decks)
         sync_decks_action.setToolTip("Automatically download all your purchased decks")
         nottorney_menu.addAction(sync_decks_action)
         
-        # Manage Decks action (SECONDARY - for advanced users)
+        # Manage Decks action (SECONDARY)
         manage_action = QAction("📚 Browse & Download", mw)
         manage_action.triggered.connect(show_deck_manager)
         manage_action.setToolTip("Browse and selectively download decks")
@@ -200,15 +246,25 @@ def update_menu():
         info_action = QAction("ℹ️ About Nottorney", mw)
         info_action.triggered.connect(show_about)
         nottorney_menu.addAction(info_action)
+    
+    # Add UI mode switcher in classic mode
+    nottorney_menu.addSeparator()
+    switch_action = QAction("🎯 Switch to Minimal Mode", mw)
+    switch_action.triggered.connect(switch_to_minimal_mode)
+    nottorney_menu.addAction(switch_action)
 
 
 def show_about():
     """Show information about Nottorney"""
+    mode_info = "Minimal Mode 🎯" if UI_MODE == "minimal" else "Classic Mode 📚"
+    
     showInfo(
         f"<h2>Nottorney for Anki</h2>"
-        f"<p>Version {ADDON_VERSION}</p>"
+        f"<p>Version {ADDON_VERSION} - <b>{mode_info}</b></p>"
         f"<p>Automatically sync your Nottorney flashcard decks.</p>"
         f"<p><b>Please login to access your purchased decks.</b></p>"
+        f"<br>"
+        f"<p><small>💡 Tip: Switch between Minimal and Classic modes from the menu!</small></p>"
         f"<br>"
         f"<p>Visit: <a href='https://nottorney.lovable.app'>nottorney.lovable.app</a></p>"
     )
@@ -218,8 +274,12 @@ def setup_menu():
     """Set up the addon menu in Anki"""
     global nottorney_menu
     
-    # Create main menu
-    nottorney_menu = mw.form.menuTools.addMenu(f"⚖️ {ADDON_NAME}")
+    # Create main menu with mode indicator
+    menu_title = "⚖️ Nottorney"
+    if UI_MODE == "minimal":
+        menu_title += " 🎯"  # Minimal mode indicator
+    
+    nottorney_menu = mw.form.menuTools.addMenu(menu_title)
     
     # Initial menu population
     update_menu()
@@ -227,7 +287,6 @@ def setup_menu():
 
 def safe_auto_sync():
     """Safely attempt auto-sync without showing errors"""
-    # Disabled for now to avoid login interruptions
     return
     
     print("=== Auto-sync triggered ===")
@@ -245,6 +304,7 @@ def init_addon():
     """Initialize the addon when Anki starts"""
     print("=== Initializing Nottorney Addon ===")
     print(f"Addon name: {config.addon_name}")
+    print(f"UI Mode: {UI_MODE}")
     
     # Check initial login state
     if config.is_logged_in():
