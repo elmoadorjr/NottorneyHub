@@ -10,6 +10,16 @@ from .config import config
 from .deck_importer import get_deck_stats
 
 
+def deck_exists(anki_deck_id):
+    """Check if a deck exists in Anki's collection"""
+    try:
+        # Try to get the deck
+        deck = mw.col.decks.get(anki_deck_id)
+        return deck is not None
+    except:
+        return False
+
+
 def get_progress_data() -> list:
     """
     Get progress data for all downloaded Nottorney decks
@@ -19,21 +29,19 @@ def get_progress_data() -> list:
     """
     downloaded_decks = config.get_downloaded_decks()
     progress_data = []
+    decks_to_remove = []  # Track decks that no longer exist
     
     for deck_id, deck_info in downloaded_decks.items():
         anki_deck_id = deck_info.get('anki_deck_id')
         
         if not anki_deck_id:
+            print(f"Deck {deck_id} has no Anki ID, skipping...")
             continue
         
         # Check if deck still exists in Anki
-        try:
-            deck = mw.col.decks.get(anki_deck_id)
-            if not deck:
-                print(f"Deck {deck_id} (Anki ID: {anki_deck_id}) no longer exists, skipping...")
-                continue
-        except Exception as e:
-            print(f"Error checking deck {deck_id}: {e}, skipping...")
+        if not deck_exists(anki_deck_id):
+            print(f"Deck {deck_id} (Anki ID: {anki_deck_id}) no longer exists, marking for removal...")
+            decks_to_remove.append(deck_id)
             continue
         
         # Get deck statistics
@@ -70,6 +78,11 @@ def get_progress_data() -> list:
         progress_data.append(progress)
         print(f"Prepared progress data for deck {deck_id}")
     
+    # Clean up decks that no longer exist
+    for deck_id in decks_to_remove:
+        config.remove_downloaded_deck(deck_id)
+        print(f"Removed non-existent deck {deck_id} from tracking")
+    
     return progress_data
 
 
@@ -88,8 +101,7 @@ def calculate_retention_rate(deck_id: int) -> float:
     """
     try:
         # Check if deck exists first
-        deck = mw.col.decks.get(deck_id)
-        if not deck:
+        if not deck_exists(deck_id):
             return 0.0
         
         # Calculate the timestamp for 30 days ago
@@ -147,8 +159,7 @@ def calculate_current_streak(deck_id: int) -> int:
     """
     try:
         # Check if deck exists first
-        deck = mw.col.decks.get(deck_id)
-        if not deck:
+        if not deck_exists(deck_id):
             return 0
         
         # Get card IDs for the deck
@@ -215,8 +226,7 @@ def get_review_stats_for_deck(deck_id: int, days: int = 30) -> dict:
     """
     try:
         # Check if deck exists first
-        deck = mw.col.decks.get(deck_id)
-        if not deck:
+        if not deck_exists(deck_id):
             return {}
         
         # Calculate the timestamp for X days ago
@@ -280,14 +290,9 @@ def clean_deleted_decks():
             decks_to_remove.append(deck_id)
             continue
         
-        try:
-            deck = mw.col.decks.get(anki_deck_id)
-            if not deck:
-                decks_to_remove.append(deck_id)
-                print(f"Deck {deck_id} (Anki ID: {anki_deck_id}) marked for cleanup")
-        except Exception as e:
+        if not deck_exists(anki_deck_id):
             decks_to_remove.append(deck_id)
-            print(f"Deck {deck_id} error, marked for cleanup: {e}")
+            print(f"Deck {deck_id} (Anki ID: {anki_deck_id}) marked for cleanup")
     
     # Remove the deleted decks from tracking
     for deck_id in decks_to_remove:
