@@ -1,15 +1,17 @@
 """
-Nottorney Anki Addon - Streamlined Version
-Single dialog with integrated notifications
+Nottorney Anki Addon - Streamlined Minimal Version
+Main entry point with automatic progress syncing
 """
 
 from aqt import mw, gui_hooks
 from aqt.qt import QAction, QMenu
 from aqt.utils import showInfo
 
+# Import modules
 try:
     from .ui.login_dialog import LoginDialog
     from .ui.single_dialog import MinimalNottorneyDialog
+    from .ui.notifications_dialog import NotificationsDialog
     from .config import config
     from . import sync
     from .api_client import api
@@ -26,9 +28,11 @@ except ImportError as e:
     setup_error_menu()
     raise
 
+# Addon metadata
 ADDON_NAME = "Nottorney"
 ADDON_VERSION = "1.0.0"
 
+# Global menu reference
 nottorney_menu = None
 
 
@@ -87,11 +91,24 @@ def auto_sync_progress():
         print(f"Auto-sync failed: {e}")
 
 
+def show_notifications():
+    """Show notifications dialog"""
+    if not ensure_valid_token():
+        showInfo("Your session has expired. Please login again.")
+        show_login()
+        return
+    
+    dialog = NotificationsDialog(mw)
+    dialog.exec()
+    update_menu()
+
+
 def show_minimal_dialog():
     """Show the minimalist single-dialog interface"""
     dialog = MinimalNottorneyDialog(mw)
     dialog.exec()
     
+    # Auto-sync progress after closing if logged in
     if config.is_logged_in():
         auto_sync_progress()
 
@@ -126,6 +143,7 @@ def update_menu():
     if nottorney_menu is None:
         return
     
+    # Clear all existing actions
     nottorney_menu.clear()
     
     is_logged_in = config.is_logged_in()
@@ -135,22 +153,28 @@ def update_menu():
     main_action.triggered.connect(show_minimal_dialog)
     nottorney_menu.addAction(main_action)
     
-    # Show notification count if logged in
+    # Notifications (if logged in)
     if is_logged_in:
         unread_count = config.get_unread_notification_count()
         if unread_count > 0:
-            notif_action = QAction(f"🔔 {unread_count} new updates", mw)
-            notif_action.triggered.connect(show_minimal_dialog)
-            nottorney_menu.addAction(notif_action)
+            notif_text = f"🔔 Notifications ({unread_count})"
+        else:
+            notif_text = "🔔 Notifications"
+        
+        notif_action = QAction(notif_text, mw)
+        notif_action.triggered.connect(show_notifications)
+        nottorney_menu.addAction(notif_action)
         
         nottorney_menu.addSeparator()
         
+        # Logout action
         logout_action = QAction("🚪 Logout", mw)
         logout_action.triggered.connect(logout)
         nottorney_menu.addAction(logout_action)
     else:
         nottorney_menu.addSeparator()
         
+        # Login action
         login_action = QAction("🔑 Login", mw)
         login_action.triggered.connect(show_login)
         nottorney_menu.addAction(login_action)
@@ -159,11 +183,13 @@ def update_menu():
 def on_profile_loaded():
     """Hook that runs when Anki profile is loaded"""
     if config.is_logged_in():
+        # Check notifications in background
         check_notifications_background()
 
 
 def on_main_window_state_change(new_state, old_state):
     """Hook that runs when main window state changes"""
+    # Auto-sync when user finishes a study session
     if config.is_logged_in() and new_state == "overview":
         auto_sync_progress()
 
@@ -178,9 +204,10 @@ def setup_menu():
 
 def init_addon():
     """Initialize the addon when Anki starts"""
-    print("=== Initializing Nottorney Addon ===")
-    print(f"Addon: {config.addon_name}")
+    print("=== Initializing Nottorney Addon (Minimal Mode) ===")
+    print(f"Addon name: {config.addon_name}")
     
+    # Check initial login state
     if config.is_logged_in():
         user = config.get_user()
         if user:
@@ -192,15 +219,18 @@ def init_addon():
     
     setup_menu()
     
+    # Register hooks
     gui_hooks.profile_did_open.append(on_profile_loaded)
     gui_hooks.main_window_did_init.append(lambda: check_notifications_background())
     
+    # Auto-sync progress hook (when deck browser is shown)
     try:
         gui_hooks.state_did_change.append(on_main_window_state_change)
     except:
-        pass
+        pass  # Fallback if hook not available
     
     print("=== Nottorney Addon Initialized ===")
 
 
+# Run initialization
 init_addon()
