@@ -2,6 +2,7 @@
 Deck importer for the Nottorney addon - FIXED VERSION
 Handles importing .apkg files into Anki
 FIXED: Properly handles DeckNameId objects and PyQt6 compatibility
+ENHANCED: Added parent parameter to prevent orphaned operations
 """
 
 import tempfile
@@ -145,7 +146,7 @@ def import_deck(deck_content: bytes, deck_name: str) -> int:
 
 
 def import_deck_with_progress(deck_content: bytes, deck_name: str, 
-                              on_success=None, on_failure=None):
+                              on_success=None, on_failure=None, parent=None):
     """
     Import a deck with progress tracking (runs in background)
     
@@ -154,7 +155,13 @@ def import_deck_with_progress(deck_content: bytes, deck_name: str,
         deck_name: Name of the deck
         on_success: Callback function when import succeeds (receives deck_id as int)
         on_failure: Callback function when import fails (receives error message)
+        parent: Parent widget for the operation (defaults to mw)
+                Using the dialog as parent helps prevent orphaned operations
     """
+    # Default to main window if no parent provided
+    if parent is None:
+        parent = mw
+    
     def import_in_background():
         """Background import operation"""
         return import_deck(deck_content, deck_name)
@@ -174,8 +181,9 @@ def import_deck_with_progress(deck_content: bytes, deck_name: str,
             on_failure(error_msg)
     
     # Use Anki's QueryOp for background operations
+    # FIXED: Use provided parent instead of always using mw
     op = QueryOp(
-        parent=mw,
+        parent=parent,  # Use dialog as parent to bind lifecycle
         op=lambda col: import_in_background(),
         success=on_done
     )

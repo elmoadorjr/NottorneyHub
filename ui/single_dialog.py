@@ -1,7 +1,7 @@
 """
 Minimal Dialog for Nottorney Addon
 FIXED: Complete PyQt6 compatibility + proper response handling + field name fixes
-Version: 1.0.3 - FIXED: Download not closing dialog, better error handling
+Version: 1.0.4 - FIXED: Prevents dialog closure during download, adds progress dialog
 """
 
 from aqt.qt import (
@@ -29,7 +29,32 @@ class MinimalNottorneyDialog(QDialog):
         self.setWindowTitle("⚖️ Nottorney")
         self.setMinimumSize(600, 500)
         self.all_decks = []  # Store all decks for filtering
+        self.import_in_progress = False  # Track import state
+        self.progress_dialog = None  # Progress dialog reference
         self.setup_ui()
+    
+    def closeEvent(self, event):
+        """Override close event to prevent closing during import"""
+        if self.import_in_progress:
+            reply = QMessageBox.question(
+                self,
+                "Import in Progress",
+                "A deck is being imported. Closing now may leave the import incomplete.\n\n"
+                "Are you sure you want to close?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.No:
+                event.ignore()
+                return
+        
+        # Clean up progress dialog if it exists
+        if self.progress_dialog:
+            self.progress_dialog.close()
+            self.progress_dialog = None
+        
+        event.accept()
     
     def setup_ui(self):
         """Setup UI"""
@@ -341,8 +366,14 @@ class MinimalNottorneyDialog(QDialog):
         
         set_access_token(token)
         
-        # FIXED: Disable close button during download
+        # FIXED: Set import in progress flag
+        self.import_in_progress = True
+        
+        # FIXED: Disable close button AND all dialog buttons during download
         self.close_btn.setEnabled(False)
+        for btn in self.findChildren(QPushButton):
+            if btn.text() in ["⬇️ Download Selected", "🔄 Refresh", "Logout"]:
+                btn.setEnabled(False)
         
         try:
             self.status_label.setText(f"⏳ Downloading {deck_name}...")
@@ -366,10 +397,31 @@ class MinimalNottorneyDialog(QDialog):
             if not deck_content or len(deck_content) == 0:
                 raise Exception("Downloaded file is empty")
             
+            # FIXED: Show progress dialog
+            self.progress_dialog = QProgressDialog(
+                f"Importing '{deck_name}' into Anki...\n\nThis may take a few moments.",
+                None,  # No cancel button
+                0, 0,  # Indeterminate progress
+                self
+            )
+            self.progress_dialog.setWindowTitle("Importing Deck")
+            self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+            self.progress_dialog.setMinimumDuration(0)  # Show immediately
+            self.progress_dialog.setCancelButton(None)  # Disable cancel
+            self.progress_dialog.show()
+            
             self.status_label.setText(f"⏳ Importing into Anki...")
             
             # Import into Anki with progress
             def on_import_success(anki_deck_id):
+                # Clear import in progress flag
+                self.import_in_progress = False
+                
+                # Close progress dialog
+                if self.progress_dialog:
+                    self.progress_dialog.close()
+                    self.progress_dialog = None
+                
                 # Save to config
                 success = config.save_downloaded_deck(deck_id, deck_version, anki_deck_id)
                 
@@ -390,28 +442,51 @@ class MinimalNottorneyDialog(QDialog):
                         f"You may need to download it again later for updates."
                     )
                 
-                # FIXED: Re-enable close button
+                # FIXED: Re-enable all buttons
                 self.close_btn.setEnabled(True)
+                for btn in self.findChildren(QPushButton):
+                    if btn.text() in ["⬇️ Download Selected", "🔄 Refresh", "Logout"]:
+                        btn.setEnabled(True)
             
             def on_import_failure(error_msg):
+                # Clear import in progress flag
+                self.import_in_progress = False
+                
+                # Close progress dialog
+                if self.progress_dialog:
+                    self.progress_dialog.close()
+                    self.progress_dialog = None
+                
                 self.status_label.setText(f"❌ Import failed")
                 QMessageBox.critical(
                     self, "Import Failed",
                     f"Failed to import '{deck_name}':\n\n{error_msg}"
                 )
                 
-                # FIXED: Re-enable close button
+                # FIXED: Re-enable all buttons
                 self.close_btn.setEnabled(True)
+                for btn in self.findChildren(QPushButton):
+                    if btn.text() in ["⬇️ Download Selected", "🔄 Refresh", "Logout"]:
+                        btn.setEnabled(True)
             
-            # Import with progress tracking
+            # FIXED: Import with progress tracking, passing self as parent
             import_deck_with_progress(
                 deck_content, 
                 deck_name,
                 on_success=on_import_success,
-                on_failure=on_import_failure
+                on_failure=on_import_failure,
+                parent=self  # Pass dialog as parent to bind lifecycle
             )
         
         except NottorneyAPIError as e:
+            # Clear import in progress flag
+            self.import_in_progress = False
+            
+            # Close progress dialog
+            if self.progress_dialog:
+                self.progress_dialog.close()
+                self.progress_dialog = None
+            
             error_msg = str(e)
             if e.status_code == 403:
                 error_msg = f"You don't have access to '{deck_name}'.\n\nPlease purchase it first."
@@ -422,15 +497,29 @@ class MinimalNottorneyDialog(QDialog):
             self.status_label.setText(f"❌ Download failed")
             QMessageBox.critical(self, "Download Error", error_msg)
             
-            # FIXED: Re-enable close button
+            # FIXED: Re-enable all buttons
             self.close_btn.setEnabled(True)
+            for btn in self.findChildren(QPushButton):
+                if btn.text() in ["⬇️ Download Selected", "🔄 Refresh", "Logout"]:
+                    btn.setEnabled(True)
         
         except Exception as e:
+            # Clear import in progress flag
+            self.import_in_progress = False
+            
+            # Close progress dialog
+            if self.progress_dialog:
+                self.progress_dialog.close()
+                self.progress_dialog = None
+            
             self.status_label.setText(f"❌ Download failed")
             QMessageBox.critical(
                 self, "Error",
                 f"Failed to download '{deck_name}':\n\n{str(e)}"
             )
             
-            # FIXED: Re-enable close button
+            # FIXED: Re-enable all buttons
             self.close_btn.setEnabled(True)
+            for btn in self.findChildren(QPushButton):
+                if btn.text() in ["⬇️ Download Selected", "🔄 Refresh", "Logout"]:
+                    btn.setEnabled(True)
