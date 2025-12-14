@@ -1,6 +1,7 @@
 """
 Minimal Dialog for Nottorney Addon
-FIXED: Complete PyQt6 compatibility for Anki 24.x+
+FIXED: Complete PyQt6 compatibility + proper response handling + field name fixes
+Version: 1.0.2
 """
 
 from aqt.qt import (
@@ -239,10 +240,14 @@ class MinimalNottorneyDialog(QDialog):
             self.deck_list.clear()
             self.all_decks = []
             
-            # Try browse_decks first (shows all decks)
+            # Call browse_decks (now includes action parameter)
             result = api.browse_decks()
             
-            if result.get('success'):
+            # FIXED: Handle both response formats - check for decks key OR success
+            has_decks = "decks" in result
+            is_successful = result.get('success', False)
+            
+            if has_decks or is_successful:
                 decks = result.get('decks', [])
                 self.all_decks = decks
                 
@@ -251,7 +256,9 @@ class MinimalNottorneyDialog(QDialog):
                 
                 for deck in decks:
                     deck_id = deck.get('id')
-                    deck_name = deck.get('name', 'Unknown Deck')
+                    
+                    # FIXED: Use 'title' field instead of 'name' for deck display
+                    deck_name = deck.get('title') or deck.get('name', 'Unknown Deck')
                     deck_version = deck.get('version', '1.0')
                     
                     # Check if already downloaded
@@ -274,7 +281,7 @@ class MinimalNottorneyDialog(QDialog):
                 
                 self.status_label.setText(f"✓ Loaded {len(decks)} deck(s)")
             else:
-                error_msg = result.get('message', 'Failed to load decks')
+                error_msg = result.get('message') or result.get('error', 'Failed to load decks')
                 self.status_label.setText(f"❌ {error_msg}")
                 QMessageBox.warning(self, "Error", error_msg)
         
@@ -312,7 +319,9 @@ class MinimalNottorneyDialog(QDialog):
         # FIXED: PyQt6 requires Qt.ItemDataRole.UserRole
         deck = current.data(Qt.ItemDataRole.UserRole)
         deck_id = deck.get('id')
-        deck_name = deck.get('name', 'Unknown')
+        
+        # FIXED: Use 'title' field instead of 'name'
+        deck_name = deck.get('title') or deck.get('name', 'Unknown')
         deck_version = deck.get('version', '1.0')
         
         # Check if already downloaded

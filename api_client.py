@@ -1,6 +1,7 @@
 """
 Robust API client for Nottorney Add-on
-FIXED: Enhanced error handling and response validation
+FIXED: Enhanced error handling, response validation, and browse_decks action parameter
+Version: 1.0.2
 """
 
 from __future__ import annotations
@@ -167,9 +168,26 @@ class ApiClient:
         """Get user's purchased decks"""
         return self.post("/addon-get-purchases")
 
-    def browse_decks(self) -> Any:
-        """Browse available decks"""
-        return self.post("/addon-browse-decks")
+    def browse_decks(self, subject: Optional[str] = None, search: Optional[str] = None) -> Any:
+        """
+        Browse available decks
+        
+        Args:
+            subject: Optional subject filter
+            search: Optional search query
+        
+        Returns:
+            API response with decks list
+        """
+        # FIXED: Always include action parameter for backend compatibility
+        json_body = {"action": "list"}
+        
+        if subject:
+            json_body["subject"] = subject
+        if search:
+            json_body["search"] = search
+        
+        return self.post("/addon-browse-decks", json_body=json_body)
 
     def download_deck(self, deck_id: str) -> Any:
         """Get download URL for a deck"""
