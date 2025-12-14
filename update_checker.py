@@ -169,8 +169,7 @@ class UpdateChecker:
             return
         
         # Build message
-        lines = ["Available Updates:
-"]
+        lines = ["Available Updates:\n"]
         
         for deck_id, update_info in updates_dict.items():
             current = update_info.get('current_version', 'Unknown')
@@ -193,8 +192,7 @@ class UpdateChecker:
         
         lines.append("Open Nottorney to update your decks.")
         
-        showInfo("
-".join(lines))
+        showInfo("\n".join(lines))
     
     def get_update_info(self, deck_id: str) -> Optional[Dict]:
         """
