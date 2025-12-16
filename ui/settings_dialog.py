@@ -387,6 +387,8 @@ class SettingsDialog(QDialog):
         """Create Admin tab (only visible to admins)"""
         tab = QWidget()
         layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(12)
         
         # Warning banner
         warning = QLabel(
@@ -395,7 +397,7 @@ class SettingsDialog(QDialog):
         )
         warning.setStyleSheet(
             "background-color: #fff3cd; color: #856404; "
-            "padding: 10px; border-radius: 5px; font-weight: bold;"
+            "padding: 12px; border-radius: 5px; font-weight: bold;"
         )
         warning.setWordWrap(True)
         layout.addWidget(warning)
@@ -409,6 +411,7 @@ class SettingsDialog(QDialog):
         self.admin_deck_selector = QComboBox()
         self.admin_deck_selector.setMinimumWidth(300)
         self.admin_deck_selector.setMinimumHeight(30)
+        self.admin_deck_selector.currentIndexChanged.connect(self.on_admin_deck_selected)
         deck_layout.addRow("Anki Deck:", self.admin_deck_selector)
         
         # Create new deck option
@@ -426,9 +429,9 @@ class SettingsDialog(QDialog):
         
         # Deck ID input for existing deck
         self.admin_deck_id_input = QLineEdit()
-        self.admin_deck_id_input.setPlaceholderText("Enter existing deck UUID (leave empty for new deck)")
+        self.admin_deck_id_input.setPlaceholderText("Auto-filled from selected deck, or enter manually")
         self.admin_deck_id_input.setMinimumHeight(28)
-        deck_layout.addRow("Existing Deck ID:", self.admin_deck_id_input)
+        deck_layout.addRow("Server Deck ID:", self.admin_deck_id_input)
         
         # Load decks
         self.load_admin_decks()
@@ -439,28 +442,31 @@ class SettingsDialog(QDialog):
         # Push Changes Section
         push_group = QGroupBox("Push Changes to Server")
         push_layout = QVBoxLayout()
+        push_layout.setSpacing(8)
+        push_layout.setContentsMargins(10, 15, 10, 10)
         
         push_info = QLabel(
-            "Push modified cards from your Anki to the server database.\n"
+            "Push modified cards from your Anki to the server database. "
             "This will create a new version for all users to sync."
         )
-        push_info.setStyleSheet("color: #666;")
         push_info.setWordWrap(True)
         push_layout.addWidget(push_info)
         
-        version_layout = QHBoxLayout()
-        version_layout.addWidget(QLabel("New Version:"))
+        # Version and notes inputs using form layout for better alignment
+        push_form = QFormLayout()
+        push_form.setSpacing(8)
+        
         self.admin_version_input = QLineEdit()
         self.admin_version_input.setPlaceholderText("e.g., 2.2.0")
-        version_layout.addWidget(self.admin_version_input)
-        push_layout.addLayout(version_layout)
+        self.admin_version_input.setMinimumHeight(28)
+        push_form.addRow("New Version:", self.admin_version_input)
         
-        notes_layout = QHBoxLayout()
-        notes_layout.addWidget(QLabel("Version Notes:"))
         self.admin_notes_input = QLineEdit()
         self.admin_notes_input.setPlaceholderText("e.g., Updated 50 cards with new citations")
-        notes_layout.addWidget(self.admin_notes_input)
-        push_layout.addLayout(notes_layout)
+        self.admin_notes_input.setMinimumHeight(28)
+        push_form.addRow("Version Notes:", self.admin_notes_input)
+        
+        push_layout.addLayout(push_form)
         
         push_btn = QPushButton("🚀 Push Changes to Server")
         push_btn.setStyleSheet(
@@ -476,12 +482,13 @@ class SettingsDialog(QDialog):
         # Import Deck Section
         import_group = QGroupBox("Import Full Deck to Database")
         import_layout = QVBoxLayout()
+        import_layout.setSpacing(8)
+        import_layout.setContentsMargins(10, 15, 10, 10)
         
         import_info = QLabel(
-            "One-time import of all cards from your Anki deck to the server.\n"
+            "One-time import of all cards from your Anki deck to the server. "
             "Use this for initial setup or to completely refresh the database."
         )
-        import_info.setStyleSheet("color: #666;")
         import_info.setWordWrap(True)
         import_layout.addWidget(import_info)
         
@@ -503,11 +510,21 @@ class SettingsDialog(QDialog):
         # Status output
         status_group = QGroupBox("Status")
         status_layout = QVBoxLayout()
+        status_layout.setSpacing(8)
+        status_layout.setContentsMargins(10, 15, 10, 10)
         
+        # Progress bar
+        self.admin_progress = QProgressBar()
+        self.admin_progress.setMinimumHeight(20)
+        self.admin_progress.setTextVisible(True)
+        self.admin_progress.setValue(0)
+        status_layout.addWidget(self.admin_progress)
+        
+        # Status log
         self.admin_status = QTextEdit()
         self.admin_status.setReadOnly(True)
-        self.admin_status.setMaximumHeight(100)
-        self.admin_status.setStyleSheet("font-family: monospace; font-size: 11px;")
+        self.admin_status.setMaximumHeight(80)
+        self.admin_status.setPlaceholderText("Operation status will appear here...")
         status_layout.addWidget(self.admin_status)
         
         status_group.setLayout(status_layout)
@@ -555,6 +572,48 @@ class SettingsDialog(QDialog):
     def admin_log(self, message):
         """Add message to admin status log"""
         self.admin_status.append(message)
+        # Scroll to bottom
+        scrollbar = self.admin_status.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+    
+    def admin_set_progress(self, value, maximum=100):
+        """Update progress bar"""
+        self.admin_progress.setMaximum(maximum)
+        self.admin_progress.setValue(value)
+        # Process events to update UI
+        from aqt.qt import QApplication
+        QApplication.processEvents()
+    
+    def on_admin_deck_selected(self, index):
+        """Handle admin deck selection - auto-fill the server deck ID if known"""
+        deck_data = self.admin_deck_selector.currentData()
+        
+        if not deck_data:
+            # No deck selected, clear the ID field
+            self.admin_deck_id_input.clear()
+            self.admin_deck_id_input.setReadOnly(False)
+            self.admin_deck_id_input.setPlaceholderText("Select a deck first")
+            return
+        
+        anki_deck_id, existing_nottorney_id = deck_data
+        
+        if existing_nottorney_id:
+            # This deck already has a Nottorney ID - auto-fill and make read-only
+            self.admin_deck_id_input.setText(existing_nottorney_id)
+            self.admin_deck_id_input.setReadOnly(True)
+            self.admin_deck_id_input.setStyleSheet("background-color: #333; color: #aaa;")
+            self.admin_deck_id_input.setToolTip("This deck is already linked to a server deck")
+            # Disable create new option since deck already exists
+            self.admin_create_new.setChecked(False)
+            self.admin_create_new.setEnabled(False)
+        else:
+            # New deck - allow entering ID or creating new
+            self.admin_deck_id_input.clear()
+            self.admin_deck_id_input.setReadOnly(False)
+            self.admin_deck_id_input.setStyleSheet("")
+            self.admin_deck_id_input.setPlaceholderText("Enter server deck UUID, or check 'Create NEW deck'")
+            self.admin_deck_id_input.setToolTip("")
+            self.admin_create_new.setEnabled(True)
     
     def on_create_new_changed(self, state):
         """Toggle create new deck options"""
@@ -652,15 +711,17 @@ class SettingsDialog(QDialog):
             total_pushed = 0
             total_added = 0
             total_modified = 0
+            total_batches = (total_cards + CHUNK_SIZE - 1) // CHUNK_SIZE
             
-            self.admin_log(f"🚀 Pushing in {(total_cards + CHUNK_SIZE - 1) // CHUNK_SIZE} batches of {CHUNK_SIZE}...")
+            self.admin_log(f"🚀 Pushing in {total_batches} batches of {CHUNK_SIZE}...")
+            self.admin_set_progress(0, total_batches)
             
             for i in range(0, total_cards, CHUNK_SIZE):
                 chunk = changes[i:i + CHUNK_SIZE]
                 batch_num = (i // CHUNK_SIZE) + 1
-                total_batches = (total_cards + CHUNK_SIZE - 1) // CHUNK_SIZE
                 
                 self.admin_log(f"📤 Pushing batch {batch_num}/{total_batches} ({len(chunk)} cards)...")
+                self.admin_set_progress(batch_num - 1, total_batches)
                 
                 # Only first batch gets version_notes
                 notes = version_notes if i == 0 else None
@@ -676,9 +737,7 @@ class SettingsDialog(QDialog):
                 else:
                     self.admin_log(f"⚠ Batch {batch_num} error: {result.get('error', 'Unknown')}")
                 
-                # Process Qt events to keep UI responsive
-                from aqt.qt import QApplication
-                QApplication.processEvents()
+                self.admin_set_progress(batch_num, total_batches)
             
             # Final success
             self.admin_log(f"✅ Push complete! {total_pushed} cards pushed")
@@ -815,15 +874,17 @@ class SettingsDialog(QDialog):
             total_cards = len(cards)
             total_imported = 0
             created_deck_id = deck_id
+            total_batches = (total_cards + CHUNK_SIZE - 1) // CHUNK_SIZE
             
-            self.admin_log(f"📥 Uploading in {(total_cards + CHUNK_SIZE - 1) // CHUNK_SIZE} batches of {CHUNK_SIZE}...")
+            self.admin_log(f"📥 Uploading in {total_batches} batches of {CHUNK_SIZE}...")
+            self.admin_set_progress(0, total_batches)
             
             for i in range(0, total_cards, CHUNK_SIZE):
                 chunk = cards[i:i + CHUNK_SIZE]
                 batch_num = (i // CHUNK_SIZE) + 1
-                total_batches = (total_cards + CHUNK_SIZE - 1) // CHUNK_SIZE
                 
                 self.admin_log(f"📤 Uploading batch {batch_num}/{total_batches} ({len(chunk)} cards)...")
+                self.admin_set_progress(batch_num - 1, total_batches)
                 
                 # First batch creates the deck (if new), subsequent batches append
                 if i == 0:
@@ -873,9 +934,7 @@ class SettingsDialog(QDialog):
                 else:
                     self.admin_log(f"⚠ Batch {batch_num} partial: {result.get('error', 'Unknown')}")
                 
-                # Process Qt events to keep UI responsive
-                from aqt.qt import QApplication
-                QApplication.processEvents()
+                self.admin_set_progress(batch_num, total_batches)
             
             # Final success
             self.admin_log(f"✅ Import complete! {total_imported} cards imported")
