@@ -51,7 +51,7 @@ class NottorneyMainDialog(QDialog):
         layout.setSpacing(10)
         
         # Title
-        title = QLabel("⚖️ Nottorney")
+        title = QLabel("Nottorney")
         title.setStyleSheet("font-size: 20px; font-weight: bold; padding: 10px;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
@@ -222,7 +222,7 @@ class NottorneyMainDialog(QDialog):
     def load_decks(self):
         """Load user's decks with status"""
         self.deck_list.clear()
-        self.status_label.setText("⏳ Loading...")
+        self.status_label.setText("Loading...")
         
         try:
             # Clean up deleted decks
@@ -253,35 +253,39 @@ class NottorneyMainDialog(QDialog):
                 
                 # Status indicator
                 if has_update:
-                    status = "⬆ Update available"
+                    status = "[Update available]"
                     color = Qt.GlobalColor.darkYellow
                 else:
-                    status = "✓ Up to date"
+                    status = "Up to date"
                     color = Qt.GlobalColor.darkGreen
                 
-                item = QListWidgetItem(f"● {deck_name} (v{version})    {status}")
+                item = QListWidgetItem(f"{deck_name} (v{version})  -  {status}")
                 item.setData(Qt.ItemDataRole.UserRole, {'deck_id': deck_id, 'info': deck_info})
                 item.setForeground(color)
                 self.deck_list.addItem(item)
             
-            self.status_label.setText(f"✓ {len(downloaded_decks)} deck(s)")
+            self.status_label.setText(f"{len(downloaded_decks)} deck(s)")
         
         except Exception as e:
-            self.status_label.setText(f"❌ Load failed: {e}")
+            self.status_label.setText(f"Load failed: {e}")
     
     def sync_all(self):
         """Sync all decks - check for updates and apply"""
-        self.status_label.setText("⏳ Checking for updates...")
+        self.status_label.setText("Checking for updates...")
         
         try:
             # Check for updates
-            updates = update_checker.check_now()
+            updates = update_checker.check_for_updates(silent=True)
             
             if not updates:
-                # Also sync progress
-                from ..sync import sync_progress
-                sync_progress()
-                self.status_label.setText("✓ All synced, no updates")
+                # Try to sync progress (non-critical - backend may not support yet)
+                try:
+                    from ..sync import sync_progress
+                    sync_progress()
+                except Exception as e:
+                    print(f"Progress sync skipped (non-critical): {e}")
+                
+                self.status_label.setText("All synced, no updates")
                 QMessageBox.information(self, "Sync Complete", "All decks are up to date!")
                 return
             
@@ -296,23 +300,26 @@ class NottorneyMainDialog(QDialog):
                 applied = 0
                 for deck_id, update_info in updates.items():
                     try:
-                        self.status_label.setText(f"⏳ Updating {deck_id[:8]}...")
+                        self.status_label.setText(f"Updating {deck_id[:8]}...")
                         self._apply_update(deck_id, update_info)
                         applied += 1
                     except Exception as e:
                         print(f"Failed to update {deck_id}: {e}")
                 
-                # Sync progress after updates
-                from ..sync import sync_progress
-                sync_progress()
+                # Try to sync progress after updates (non-critical)
+                try:
+                    from ..sync import sync_progress
+                    sync_progress()
+                except Exception as e:
+                    print(f"Progress sync skipped (non-critical): {e}")
                 
                 self.load_decks()
                 QMessageBox.information(self, "Done", f"Applied {applied} update(s)")
             else:
-                self.status_label.setText(f"⚠ {len(updates)} updates pending")
+                self.status_label.setText(f"{len(updates)} updates pending")
         
         except Exception as e:
-            self.status_label.setText(f"❌ Sync failed")
+            self.status_label.setText("Sync failed")
             QMessageBox.critical(self, "Error", f"Sync failed: {e}")
     
     def _apply_update(self, deck_id, update_info):
@@ -366,7 +373,7 @@ class DeckBrowserDialog(QDialog):
         
         # Search
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("🔍 Search decks...")
+        self.search_input.setPlaceholderText("Search decks...")
         self.search_input.textChanged.connect(self.filter_decks)
         layout.addWidget(self.search_input)
         
@@ -400,7 +407,7 @@ class DeckBrowserDialog(QDialog):
     def load_decks(self):
         """Load available decks from server"""
         self.deck_list.clear()
-        self.status_label.setText("⏳ Loading...")
+        self.status_label.setText("Loading...")
         
         token = config.get_access_token()
         if token:
@@ -419,7 +426,7 @@ class DeckBrowserDialog(QDialog):
                     version = deck.get('version', '1.0')
                     
                     is_downloaded = deck_id in downloaded
-                    prefix = "✓ " if is_downloaded else ""
+                    prefix = "[Downloaded] " if is_downloaded else ""
                     
                     item = QListWidgetItem(f"{prefix}{name} (v{version})")
                     item.setData(Qt.ItemDataRole.UserRole, deck)
@@ -429,12 +436,12 @@ class DeckBrowserDialog(QDialog):
                     
                     self.deck_list.addItem(item)
                 
-                self.status_label.setText(f"✓ {len(decks)} deck(s)")
+                self.status_label.setText(f"{len(decks)} deck(s) available")
             else:
-                self.status_label.setText("❌ Failed to load")
+                self.status_label.setText("Failed to load")
         
         except Exception as e:
-            self.status_label.setText(f"❌ Error: {e}")
+            self.status_label.setText(f"Error: {e}")
     
     def filter_decks(self):
         """Filter deck list by search text"""
@@ -458,7 +465,7 @@ class DeckBrowserDialog(QDialog):
             QMessageBox.information(self, "Already Downloaded", "This deck is already downloaded.")
             return
         
-        self.status_label.setText("⏳ Downloading...")
+        self.status_label.setText("Downloading...")
         
         try:
             token = config.get_access_token()
@@ -488,5 +495,5 @@ class DeckBrowserDialog(QDialog):
                 raise Exception(result.get('message', 'Download failed'))
         
         except Exception as e:
-            self.status_label.setText(f"❌ Failed")
+            self.status_label.setText("Failed")
             QMessageBox.critical(self, "Error", f"Download failed: {e}")
