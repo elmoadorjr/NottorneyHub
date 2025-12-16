@@ -755,52 +755,93 @@ class SettingsDialog(QDialog):
                 })
             
             self.admin_log(f"📦 Found {len(cards)} cards to import")
-            self.admin_log(f"📥 Importing to server database...")
             
             # Set token
             token = config.get_access_token()
             if token:
                 set_access_token(token)
             
-            # Make API call - pass deck_title for new deck, deck_id for existing
-            if is_new_deck:
-                result = api.admin_import_deck(
-                    deck_id=None, 
-                    cards=cards, 
-                    version=version, 
-                    version_notes=version_notes, 
-                    clear_existing=False,
-                    deck_title=deck_title
-                )
-            else:
-                result = api.admin_import_deck(
-                    deck_id=deck_id, 
-                    cards=cards, 
-                    version=version, 
-                    version_notes=version_notes, 
-                    clear_existing=clear_existing
-                )
+            # Chunk the cards for large imports (500 per batch)
+            CHUNK_SIZE = 500
+            total_cards = len(cards)
+            total_imported = 0
+            created_deck_id = deck_id
             
-            if result.get('success'):
-                imported = result.get('cards_imported', 0)
-                new_deck_id = result.get('deck_id', deck_id)
-                self.admin_log(f"✅ Import successful! {imported} cards imported")
-                self.admin_log(f"📌 Version: {result.get('version', version)}")
-                if is_new_deck:
-                    self.admin_log(f"🆕 Created deck ID: {new_deck_id}")
+            self.admin_log(f"📥 Uploading in {(total_cards + CHUNK_SIZE - 1) // CHUNK_SIZE} batches of {CHUNK_SIZE}...")
+            
+            for i in range(0, total_cards, CHUNK_SIZE):
+                chunk = cards[i:i + CHUNK_SIZE]
+                batch_num = (i // CHUNK_SIZE) + 1
+                total_batches = (total_cards + CHUNK_SIZE - 1) // CHUNK_SIZE
                 
-                # Track the deck locally
-                if new_deck_id:
-                    config.save_downloaded_deck(new_deck_id, version, anki_deck_id)
+                self.admin_log(f"📤 Uploading batch {batch_num}/{total_batches} ({len(chunk)} cards)...")
                 
-                QMessageBox.information(
-                    self, "Import Successful",
-                    f"Imported {imported} cards to database.\n\n"
-                    f"Deck ID: {new_deck_id}\n"
-                    f"Version: {result.get('version', version)}"
-                )
-            else:
-                self.admin_log(f"❌ Import failed: {result.get('error', 'Unknown error')}")
+                # First batch creates the deck (if new), subsequent batches append
+                if i == 0:
+                    # First batch - may create new deck
+                    if is_new_deck:
+                        result = api.admin_import_deck(
+                            deck_id=None, 
+                            cards=chunk, 
+                            version=version, 
+                            version_notes=version_notes, 
+                            clear_existing=False,
+                            deck_title=deck_title,
+                            timeout=120
+                        )
+                    else:
+                        result = api.admin_import_deck(
+                            deck_id=deck_id, 
+                            cards=chunk, 
+                            version=version, 
+                            version_notes=version_notes, 
+                            clear_existing=clear_existing,
+                            timeout=120
+                        )
+                    
+                    if result.get('success'):
+                        created_deck_id = result.get('deck_id', deck_id)
+                        if is_new_deck:
+                            self.admin_log(f"🆕 Created deck: {created_deck_id}")
+                    else:
+                        self.admin_log(f"❌ First batch failed: {result.get('error', 'Unknown')}")
+                        raise Exception(f"First batch failed: {result.get('error')}")
+                else:
+                    # Subsequent batches - append to existing deck
+                    result = api.admin_import_deck(
+                        deck_id=created_deck_id, 
+                        cards=chunk, 
+                        version=version, 
+                        version_notes=None,  # Only set on first batch
+                        clear_existing=False,  # Never clear on subsequent batches
+                        timeout=120
+                    )
+                
+                if result.get('success'):
+                    batch_imported = result.get('cards_imported', len(chunk))
+                    total_imported += batch_imported
+                    self.admin_log(f"✓ Batch {batch_num} done ({total_imported}/{total_cards})")
+                else:
+                    self.admin_log(f"⚠ Batch {batch_num} partial: {result.get('error', 'Unknown')}")
+                
+                # Process Qt events to keep UI responsive
+                from aqt.qt import QApplication
+                QApplication.processEvents()
+            
+            # Final success
+            self.admin_log(f"✅ Import complete! {total_imported} cards imported")
+            self.admin_log(f"📌 Version: {version}")
+            
+            # Track the deck locally
+            if created_deck_id:
+                config.save_downloaded_deck(created_deck_id, version, anki_deck_id)
+            
+            QMessageBox.information(
+                self, "Import Successful",
+                f"Imported {total_imported} cards to database.\n\n"
+                f"Deck ID: {created_deck_id}\n"
+                f"Version: {version}"
+            )
                 
         except NottorneyAPIError as e:
             self.admin_log(f"❌ API Error: {e}")

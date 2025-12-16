@@ -639,7 +639,8 @@ class ApiClient:
     def admin_import_deck(self, deck_id: Optional[str], cards: List[Dict], version: str,
                           version_notes: Optional[str] = None,
                           clear_existing: bool = False,
-                          deck_title: Optional[str] = None) -> Any:
+                          deck_title: Optional[str] = None,
+                          timeout: int = 60) -> Any:
         """
         Admin: Import full deck to database (initial setup or full refresh).
         Only available to deck publishers/admins.
@@ -651,6 +652,7 @@ class ApiClient:
             version_notes: Optional release notes for this version
             clear_existing: If True, clears existing cards before import
             deck_title: Title for new deck (required if deck_id is None)
+            timeout: Request timeout in seconds (default 60)
         
         Returns:
             {"success": true, "deck_id": "uuid", "cards_imported": 500, "version": "1.0.0"}
@@ -666,7 +668,7 @@ class ApiClient:
             body["deck_title"] = deck_title
         if version_notes:
             body["version_notes"] = version_notes
-        return self.post("/addon-admin-import-deck", json_body=body)
+        return self.post("/addon-admin-import-deck", json_body=body, timeout=timeout)
 
 
 # === GLOBAL INSTANCE ===
