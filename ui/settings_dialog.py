@@ -427,11 +427,22 @@ class SettingsDialog(QDialog):
         self.admin_deck_title.setMinimumHeight(28)
         deck_layout.addRow("Deck Title:", self.admin_deck_title)
         
-        # Deck ID input for existing deck
+        # Deck ID input for existing deck with unlink button
+        deck_id_layout = QHBoxLayout()
         self.admin_deck_id_input = QLineEdit()
         self.admin_deck_id_input.setPlaceholderText("Auto-filled from selected deck, or enter manually")
         self.admin_deck_id_input.setMinimumHeight(28)
-        deck_layout.addRow("Server Deck ID:", self.admin_deck_id_input)
+        deck_id_layout.addWidget(self.admin_deck_id_input)
+        
+        self.admin_unlink_btn = QPushButton("🔗 Unlink")
+        self.admin_unlink_btn.setToolTip("Remove server link (useful if server deck was deleted)")
+        self.admin_unlink_btn.setStyleSheet("color: #dc3545; font-weight: bold;")
+        self.admin_unlink_btn.setFixedWidth(80)
+        self.admin_unlink_btn.clicked.connect(self.admin_unlink_deck)
+        self.admin_unlink_btn.setEnabled(False)  # Disabled until a linked deck is selected
+        deck_id_layout.addWidget(self.admin_unlink_btn)
+        
+        deck_layout.addRow("Server Deck ID:", deck_id_layout)
         
         # Load decks
         self.load_admin_decks()
@@ -593,6 +604,7 @@ class SettingsDialog(QDialog):
             self.admin_deck_id_input.clear()
             self.admin_deck_id_input.setReadOnly(False)
             self.admin_deck_id_input.setPlaceholderText("Select a deck first")
+            self.admin_unlink_btn.setEnabled(False)
             return
         
         anki_deck_id, existing_nottorney_id = deck_data
@@ -602,10 +614,12 @@ class SettingsDialog(QDialog):
             self.admin_deck_id_input.setText(existing_nottorney_id)
             self.admin_deck_id_input.setReadOnly(True)
             self.admin_deck_id_input.setStyleSheet("background-color: #333; color: #aaa;")
-            self.admin_deck_id_input.setToolTip("This deck is already linked to a server deck")
+            self.admin_deck_id_input.setToolTip("This deck is already linked to a server deck. Click 'Unlink' to remove.")
             # Disable create new option since deck already exists
             self.admin_create_new.setChecked(False)
             self.admin_create_new.setEnabled(False)
+            # Enable unlink button
+            self.admin_unlink_btn.setEnabled(True)
         else:
             # New deck - allow entering ID or creating new
             self.admin_deck_id_input.clear()
@@ -614,6 +628,61 @@ class SettingsDialog(QDialog):
             self.admin_deck_id_input.setPlaceholderText("Enter server deck UUID, or check 'Create NEW deck'")
             self.admin_deck_id_input.setToolTip("")
             self.admin_create_new.setEnabled(True)
+            # Disable unlink button (nothing to unlink)
+            self.admin_unlink_btn.setEnabled(False)
+    
+    def admin_unlink_deck(self):
+        """Unlink the selected deck from its server deck ID"""
+        deck_data = self.admin_deck_selector.currentData()
+        if not deck_data:
+            return
+        
+        anki_deck_id, existing_nottorney_id = deck_data
+        
+        if not existing_nottorney_id:
+            QMessageBox.information(self, "Not Linked", "This deck is not linked to a server deck.")
+            return
+        
+        # Get deck name for confirmation
+        deck_name = "Unknown"
+        if mw.col:
+            try:
+                deck = mw.col.decks.get(anki_deck_id)
+                if deck:
+                    deck_name = deck['name']
+            except:
+                pass
+        
+        reply = QMessageBox.question(
+            self, "Confirm Unlink",
+            f"This will remove the link between:\n\n"
+            f"Anki Deck: {deck_name}\n"
+            f"Server ID: {existing_nottorney_id}\n\n"
+            "The deck will remain in Anki, but you'll need to re-link it "
+            "or create a new server deck to push/import.\n\n"
+            "This is useful if the server deck was deleted.\n\n"
+            "Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        # Remove from tracking
+        success = config.remove_downloaded_deck(existing_nottorney_id)
+        
+        if success:
+            self.admin_log(f"✓ Unlinked deck: {deck_name}")
+            QMessageBox.information(
+                self, "Unlinked",
+                f"Successfully unlinked '{deck_name}' from server.\n\n"
+                "You can now link it to a different server deck or create a new one."
+            )
+            # Reload the deck list to reflect the change
+            self.load_admin_decks()
+        else:
+            self.admin_log(f"✗ Failed to unlink deck")
+            QMessageBox.warning(self, "Error", "Failed to unlink deck. Please try again.")
     
     def on_create_new_changed(self, state):
         """Toggle create new deck options"""
@@ -879,6 +948,10 @@ class SettingsDialog(QDialog):
             self.admin_log(f"📥 Uploading in {total_batches} batches of {CHUNK_SIZE}...")
             self.admin_set_progress(0, total_batches)
             
+            failed_batch = None
+            retry_count = 0
+            max_retries = 3
+            
             for i in range(0, total_cards, CHUNK_SIZE):
                 chunk = cards[i:i + CHUNK_SIZE]
                 batch_num = (i // CHUNK_SIZE) + 1
@@ -886,53 +959,79 @@ class SettingsDialog(QDialog):
                 self.admin_log(f"📤 Uploading batch {batch_num}/{total_batches} ({len(chunk)} cards)...")
                 self.admin_set_progress(batch_num - 1, total_batches)
                 
-                # First batch creates the deck (if new), subsequent batches append
-                if i == 0:
-                    # First batch - may create new deck
-                    if is_new_deck:
-                        result = api.admin_import_deck(
-                            deck_id=None, 
-                            cards=chunk, 
-                            version=version, 
-                            version_notes=version_notes, 
-                            clear_existing=False,
-                            deck_title=deck_title,
-                            timeout=120
-                        )
-                    else:
-                        result = api.admin_import_deck(
-                            deck_id=deck_id, 
-                            cards=chunk, 
-                            version=version, 
-                            version_notes=version_notes, 
-                            clear_existing=clear_existing,
-                            timeout=120
-                        )
-                    
-                    if result.get('success'):
-                        created_deck_id = result.get('deck_id', deck_id)
-                        if is_new_deck:
-                            self.admin_log(f"🆕 Created deck: {created_deck_id}")
-                    else:
-                        self.admin_log(f"❌ First batch failed: {result.get('error', 'Unknown')}")
-                        raise Exception(f"First batch failed: {result.get('error')}")
-                else:
-                    # Subsequent batches - append to existing deck
-                    result = api.admin_import_deck(
-                        deck_id=created_deck_id, 
-                        cards=chunk, 
-                        version=version, 
-                        version_notes=None,  # Only set on first batch
-                        clear_existing=False,  # Never clear on subsequent batches
-                        timeout=120
-                    )
+                # Retry logic for each batch
+                batch_success = False
+                for attempt in range(max_retries):
+                    try:
+                        # First batch creates the deck (if new), subsequent batches append
+                        if i == 0:
+                            # First batch - may create new deck
+                            if is_new_deck:
+                                result = api.admin_import_deck(
+                                    deck_id=None, 
+                                    cards=chunk, 
+                                    version=version, 
+                                    version_notes=version_notes, 
+                                    clear_existing=False,
+                                    deck_title=deck_title,
+                                    timeout=180  # Increased timeout
+                                )
+                            else:
+                                result = api.admin_import_deck(
+                                    deck_id=deck_id, 
+                                    cards=chunk, 
+                                    version=version, 
+                                    version_notes=version_notes, 
+                                    clear_existing=clear_existing,
+                                    timeout=180  # Increased timeout
+                                )
+                            
+                            if result.get('success'):
+                                created_deck_id = result.get('deck_id', deck_id)
+                                if is_new_deck:
+                                    self.admin_log(f"🆕 Created deck: {created_deck_id}")
+                                    # Save tracking immediately after deck creation
+                                    config.save_downloaded_deck(created_deck_id, version, anki_deck_id)
+                                batch_success = True
+                            else:
+                                raise Exception(f"First batch failed: {result.get('error')}")
+                        else:
+                            # Subsequent batches - append to existing deck
+                            result = api.admin_import_deck(
+                                deck_id=created_deck_id, 
+                                cards=chunk, 
+                                version=version, 
+                                version_notes=None,  # Only set on first batch
+                                clear_existing=False,  # Never clear on subsequent batches
+                                timeout=180  # Increased timeout
+                            )
+                            
+                            if result.get('success'):
+                                batch_success = True
+                            else:
+                                raise Exception(f"Batch {batch_num} failed: {result.get('error')}")
+                        
+                        break  # Success, exit retry loop
+                        
+                    except Exception as batch_error:
+                        retry_count = attempt + 1
+                        if retry_count < max_retries:
+                            self.admin_log(f"⚠ Batch {batch_num} failed (attempt {retry_count}/{max_retries}), retrying...")
+                            # Short delay before retry
+                            from aqt.qt import QApplication
+                            import time
+                            QApplication.processEvents()
+                            time.sleep(2)
+                        else:
+                            # All retries exhausted
+                            failed_batch = batch_num
+                            self.admin_log(f"❌ Batch {batch_num} failed after {max_retries} attempts: {batch_error}")
+                            raise batch_error
                 
-                if result.get('success'):
+                if batch_success:
                     batch_imported = result.get('cards_imported', len(chunk))
                     total_imported += batch_imported
                     self.admin_log(f"✓ Batch {batch_num} done ({total_imported}/{total_cards})")
-                else:
-                    self.admin_log(f"⚠ Batch {batch_num} partial: {result.get('error', 'Unknown')}")
                 
                 self.admin_set_progress(batch_num, total_batches)
             
@@ -940,7 +1039,7 @@ class SettingsDialog(QDialog):
             self.admin_log(f"✅ Import complete! {total_imported} cards imported")
             self.admin_log(f"📌 Version: {version}")
             
-            # Track the deck locally
+            # Update deck tracking with final version
             if created_deck_id:
                 config.save_downloaded_deck(created_deck_id, version, anki_deck_id)
             
@@ -953,10 +1052,48 @@ class SettingsDialog(QDialog):
                 
         except NottorneyAPIError as e:
             self.admin_log(f"❌ API Error: {e}")
-            QMessageBox.critical(self, "API Error", str(e))
+            # Save partial progress
+            if created_deck_id and total_imported > 0:
+                config.save_downloaded_deck(created_deck_id, version, anki_deck_id)
+                self.admin_log(f"💾 Saved partial progress: {total_imported} cards")
+                self.admin_log(f"📋 Deck ID: {created_deck_id}")
+                
+                reply = QMessageBox.warning(
+                    self, "Partial Import",
+                    f"Import failed after {total_imported} cards.\n\n"
+                    f"Deck ID: {created_deck_id}\n\n"
+                    "The partial import has been saved. You can:\n"
+                    "1. Try importing again (remaining cards will be added)\n"
+                    "2. Note down the Deck ID for manual recovery\n\n"
+                    f"Error: {e}\n\n"
+                    "Copy Deck ID to clipboard?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    from aqt.qt import QApplication
+                    QApplication.clipboard().setText(created_deck_id)
+                    self.admin_log("📋 Deck ID copied to clipboard")
+            else:
+                QMessageBox.critical(self, "API Error", str(e))
+                
         except Exception as e:
             self.admin_log(f"❌ Error: {e}")
-            QMessageBox.critical(self, "Error", f"Import failed: {e}")
+            # Save partial progress
+            if created_deck_id and total_imported > 0:
+                config.save_downloaded_deck(created_deck_id, version, anki_deck_id)
+                self.admin_log(f"💾 Saved partial progress: {total_imported} cards")
+                self.admin_log(f"📋 Deck ID: {created_deck_id}")
+                
+                QMessageBox.warning(
+                    self, "Partial Import",
+                    f"Import failed after {total_imported} cards.\n\n"
+                    f"Deck ID: {created_deck_id}\n\n"
+                    "The partial import has been saved.\n"
+                    f"Error: {e}"
+                )
+            else:
+                QMessageBox.critical(self, "Error", f"Import failed: {e}")
+
     
     def save_settings(self):
         """Save all settings"""
