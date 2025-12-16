@@ -636,29 +636,34 @@ class ApiClient:
             body["version_notes"] = version_notes
         return self.post("/addon-admin-push-changes", json_body=body)
 
-    def admin_import_deck(self, deck_id: str, cards: List[Dict], version: str,
+    def admin_import_deck(self, deck_id: Optional[str], cards: List[Dict], version: str,
                           version_notes: Optional[str] = None,
-                          clear_existing: bool = False) -> Any:
+                          clear_existing: bool = False,
+                          deck_title: Optional[str] = None) -> Any:
         """
         Admin: Import full deck to database (initial setup or full refresh).
         Only available to deck publishers/admins.
         
         Args:
-            deck_id: The deck ID to import into
+            deck_id: The deck ID to import into (None if creating new deck)
             cards: List of card data (each with card_guid, note_type, fields, tags)
             version: Version string for this import
             version_notes: Optional release notes for this version
             clear_existing: If True, clears existing cards before import
+            deck_title: Title for new deck (required if deck_id is None)
         
         Returns:
-            {"success": true, "cards_imported": 500, "version": "1.0.0"}
+            {"success": true, "deck_id": "uuid", "cards_imported": 500, "version": "1.0.0"}
         """
         body = {
-            "deck_id": deck_id,
             "cards": cards,
             "version": version,
             "clear_existing": clear_existing
         }
+        if deck_id:
+            body["deck_id"] = deck_id
+        if deck_title:
+            body["deck_title"] = deck_title
         if version_notes:
             body["version_notes"] = version_notes
         return self.post("/addon-admin-import-deck", json_body=body)

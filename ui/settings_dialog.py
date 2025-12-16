@@ -408,10 +408,22 @@ class SettingsDialog(QDialog):
         self.admin_deck_selector.setMinimumWidth(300)
         deck_layout.addRow("Anki Deck:", self.admin_deck_selector)
         
-        # Deck ID input for server
+        # Create new deck option
+        self.admin_create_new = QCheckBox("Create NEW deck (first-time import)")
+        self.admin_create_new.setStyleSheet("color: #28a745; font-weight: bold;")
+        self.admin_create_new.stateChanged.connect(self.on_create_new_changed)
+        deck_layout.addRow("", self.admin_create_new)
+        
+        # Deck title for new deck
+        self.admin_deck_title = QLineEdit()
+        self.admin_deck_title.setPlaceholderText("Enter deck title for new deck")
+        self.admin_deck_title.setEnabled(False)
+        deck_layout.addRow("Deck Title:", self.admin_deck_title)
+        
+        # Deck ID input for existing deck
         self.admin_deck_id_input = QLineEdit()
-        self.admin_deck_id_input.setPlaceholderText("Enter the Nottorney deck UUID (from database)")
-        deck_layout.addRow("Server Deck ID:", self.admin_deck_id_input)
+        self.admin_deck_id_input.setPlaceholderText("Enter existing deck UUID (leave empty for new deck)")
+        deck_layout.addRow("Existing Deck ID:", self.admin_deck_id_input)
         
         # Load decks
         self.load_admin_decks()
@@ -539,6 +551,14 @@ class SettingsDialog(QDialog):
         """Add message to admin status log"""
         self.admin_status.append(message)
     
+    def on_create_new_changed(self, state):
+        """Toggle create new deck options"""
+        is_new = self.admin_create_new.isChecked()
+        self.admin_deck_title.setEnabled(is_new)
+        self.admin_deck_id_input.setEnabled(not is_new)
+        if is_new:
+            self.admin_deck_id_input.clear()
+    
     def admin_push_changes(self):
         """Push changes from Anki to server"""
         deck_data = self.admin_deck_selector.currentData()
@@ -649,18 +669,32 @@ class SettingsDialog(QDialog):
             return
         
         anki_deck_id, existing_nottorney_id = deck_data
+        is_new_deck = self.admin_create_new.isChecked()
         
-        # Get deck_id from input or existing mapping
-        deck_id = self.admin_deck_id_input.text().strip()
-        if not deck_id and existing_nottorney_id:
-            deck_id = existing_nottorney_id
+        # For new deck, require title. For existing deck, require ID.
+        deck_id = None
+        deck_title = None
         
-        if not deck_id:
-            QMessageBox.warning(
-                self, "Deck ID Required", 
-                "Please enter the Server Deck ID (UUID from Nottorney database)."
-            )
-            return
+        if is_new_deck:
+            deck_title = self.admin_deck_title.text().strip()
+            if not deck_title:
+                QMessageBox.warning(
+                    self, "Deck Title Required", 
+                    "Please enter a title for the new deck."
+                )
+                return
+        else:
+            # Get deck_id from input or existing mapping
+            deck_id = self.admin_deck_id_input.text().strip()
+            if not deck_id and existing_nottorney_id:
+                deck_id = existing_nottorney_id
+            
+            if not deck_id:
+                QMessageBox.warning(
+                    self, "Deck ID Required", 
+                    "Please enter the existing Deck ID, or check 'Create NEW deck'."
+                )
+                return
         
         version = self.admin_version_input.text().strip()
         if not version:
@@ -674,15 +708,21 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "No Collection", "Anki collection not available.")
             return
         
-        # Confirm action with extra warning for clear
-        warning_text = (
-            f"This will import ALL cards from this deck to the server database "
-            f"as version {version}.\n\n"
-            f"Server Deck ID: {deck_id}\n\n"
-        )
-        if clear_existing:
-            warning_text += "⚠️ WARNING: Existing cards will be DELETED first!\n\n"
-        warning_text += "This is typically used for initial setup. Continue?"
+        # Confirm action
+        if is_new_deck:
+            warning_text = (
+                f"This will CREATE a new deck '{deck_title}' and import ALL cards "
+                f"as version {version}.\n\nContinue?"
+            )
+        else:
+            warning_text = (
+                f"This will import ALL cards from this deck to the server database "
+                f"as version {version}.\n\n"
+                f"Server Deck ID: {deck_id}\n\n"
+            )
+            if clear_existing:
+                warning_text += "⚠️ WARNING: Existing cards will be DELETED first!\n\n"
+            warning_text += "This is typically used for initial setup. Continue?"
         
         reply = QMessageBox.question(
             self, "Confirm Import",
@@ -722,20 +762,41 @@ class SettingsDialog(QDialog):
             if token:
                 set_access_token(token)
             
-            # Make API call
-            result = api.admin_import_deck(deck_id, cards, version, version_notes, clear_existing)
+            # Make API call - pass deck_title for new deck, deck_id for existing
+            if is_new_deck:
+                result = api.admin_import_deck(
+                    deck_id=None, 
+                    cards=cards, 
+                    version=version, 
+                    version_notes=version_notes, 
+                    clear_existing=False,
+                    deck_title=deck_title
+                )
+            else:
+                result = api.admin_import_deck(
+                    deck_id=deck_id, 
+                    cards=cards, 
+                    version=version, 
+                    version_notes=version_notes, 
+                    clear_existing=clear_existing
+                )
             
             if result.get('success'):
                 imported = result.get('cards_imported', 0)
+                new_deck_id = result.get('deck_id', deck_id)
                 self.admin_log(f"✅ Import successful! {imported} cards imported")
                 self.admin_log(f"📌 Version: {result.get('version', version)}")
+                if is_new_deck:
+                    self.admin_log(f"🆕 Created deck ID: {new_deck_id}")
                 
-                # Update local version
-                config.update_deck_version(deck_id, version)
+                # Track the deck locally
+                if new_deck_id:
+                    config.save_downloaded_deck(new_deck_id, version, anki_deck_id)
                 
                 QMessageBox.information(
                     self, "Import Successful",
                     f"Imported {imported} cards to database.\n\n"
+                    f"Deck ID: {new_deck_id}\n"
                     f"Version: {result.get('version', version)}"
                 )
             else:
