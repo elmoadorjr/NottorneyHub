@@ -17,8 +17,8 @@ try:
     from .api_client import api, set_access_token
     from .update_checker import update_checker
     
-    # Always use tabbed dialog (simplified - removed UI mode toggle)
-    from .ui.tabbed_dialog import NottorneyTabbedDialog as MainDialog
+    # Use simplified main dialog (v2.2.0)
+    from .ui.main_dialog import NottorneyMainDialog as MainDialog
         
 except ImportError as e:
     # Defer error display until Anki is ready (mw might not be initialized yet)
@@ -33,7 +33,7 @@ except ImportError as e:
     raise
 
 ADDON_NAME = "Nottorney"
-ADDON_VERSION = "2.1.0"
+ADDON_VERSION = "2.2.0"
 
 
 def show_settings_dialog():
@@ -108,28 +108,12 @@ def on_main_window_did_init():
 
 
 def setup_menu():
-    """Setup menu in Anki"""
+    """Setup menu in Anki - single action opens main dialog"""
     try:
-        # Create Nottorney menu
-        menu = mw.form.menuTools.addMenu("⚖️ Nottorney")
-        
-        # Add "Open" action
-        open_action = QAction("Open Nottorney", mw)
-        open_action.triggered.connect(show_main_dialog)
-        menu.addAction(open_action)
-        
-        # Add "Check for Updates" action
-        update_action = QAction("Check for Updates", mw)
-        update_action.triggered.connect(lambda: update_checker.check_for_updates(silent=False))
-        menu.addAction(update_action)
-        
-        # Add separator
-        menu.addSeparator()
-        
-        # Add "Settings" action
-        settings_action = QAction("Settings", mw)
-        settings_action.triggered.connect(show_settings_dialog)
-        menu.addAction(settings_action)
+        # Add single Nottorney action to Tools menu (no submenu)
+        action = QAction("⚖️ Nottorney", mw)
+        action.triggered.connect(show_main_dialog)
+        mw.form.menuTools.addAction(action)
         
         print(f"✓ Nottorney addon v{ADDON_VERSION} loaded successfully")
         print(f"  Auto-update check: {config.get_auto_check_updates()}")

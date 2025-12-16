@@ -82,11 +82,11 @@ class SettingsDialog(QDialog):
         # Create tabs
         self.general_tab = self.create_general_tab()
         self.protected_fields_tab = self.create_protected_fields_tab()
-        self.sync_tab = self.create_sync_tab()
+        self.advanced_tab = self.create_advanced_tab()
         
         self.tabs.addTab(self.general_tab, "🔧 General")
         self.tabs.addTab(self.protected_fields_tab, "🛡️ Protected Fields")
-        self.tabs.addTab(self.sync_tab, "🔄 Sync")
+        self.tabs.addTab(self.advanced_tab, "⚡ Advanced")
         
         # Add Admin tab only if user is admin
         if config.is_admin():
@@ -212,42 +212,237 @@ class SettingsDialog(QDialog):
         tab.setLayout(layout)
         return tab
     
-    def create_sync_tab(self):
-        """Create Sync settings tab"""
+    def create_advanced_tab(self):
+        """Create Advanced tab with power user features"""
         tab = QWidget()
         layout = QVBoxLayout()
         
-        # Sync options
-        sync_group = QGroupBox("Sync Preferences")
-        sync_layout = QFormLayout()
+        # Deck selector for advanced operations
+        deck_layout = QHBoxLayout()
+        deck_label = QLabel("Select Deck:")
+        deck_label.setStyleSheet("font-weight: bold;")
+        deck_layout.addWidget(deck_label)
         
-        self.sync_tags = QCheckBox("Sync tags with server")
-        sync_layout.addRow(self.sync_tags)
+        self.advanced_deck_selector = QComboBox()
+        self.advanced_deck_selector.setMinimumWidth(300)
+        deck_layout.addWidget(self.advanced_deck_selector)
+        deck_layout.addStretch()
+        layout.addLayout(deck_layout)
         
-        self.sync_suspend = QCheckBox("Sync suspend/buried state")
-        sync_layout.addRow(self.sync_suspend)
+        # Load decks into selector
+        self._load_advanced_decks()
         
-        self.sync_note_types = QCheckBox("Sync note type templates")
-        sync_layout.addRow(self.sync_note_types)
+        # Card Operations group
+        card_group = QGroupBox("Card Operations")
+        card_layout = QVBoxLayout()
+        
+        history_btn = QPushButton("📜 Card History")
+        history_btn.setToolTip("View card change history and rollback")
+        history_btn.clicked.connect(self._open_card_history)
+        card_layout.addWidget(history_btn)
+        
+        suggest_btn = QPushButton("💡 Submit Suggestion")
+        suggest_btn.setToolTip("Suggest improvements to card maintainer")
+        suggest_btn.clicked.connect(self._open_suggestions)
+        card_layout.addWidget(suggest_btn)
+        
+        sync_changes_btn = QPushButton("🔄 Sync Changes")
+        sync_changes_btn.setToolTip("Push/pull individual card changes")
+        sync_changes_btn.clicked.connect(self._open_sync_changes)
+        card_layout.addWidget(sync_changes_btn)
+        
+        card_group.setLayout(card_layout)
+        layout.addWidget(card_group)
+        
+        # Advanced Sync group
+        sync_group = QGroupBox("Advanced Sync")
+        sync_layout = QVBoxLayout()
+        
+        sync_tags_btn = QPushButton("🏷️ Sync Tags")
+        sync_tags_btn.clicked.connect(self._sync_tags)
+        sync_layout.addWidget(sync_tags_btn)
+        
+        sync_suspend_btn = QPushButton("⏸️ Sync Suspend/Buried State")
+        sync_suspend_btn.clicked.connect(self._sync_suspend)
+        sync_layout.addWidget(sync_suspend_btn)
+        
+        sync_media_btn = QPushButton("🖼️ Sync Media")
+        sync_media_btn.clicked.connect(self._sync_media)
+        sync_layout.addWidget(sync_media_btn)
+        
+        sync_notetypes_btn = QPushButton("📝 Sync Note Types")
+        sync_notetypes_btn.clicked.connect(self._sync_note_types)
+        sync_layout.addWidget(sync_notetypes_btn)
         
         sync_group.setLayout(sync_layout)
         layout.addWidget(sync_group)
         
-        # Sync info
-        info_group = QGroupBox("Sync Status")
-        info_layout = QVBoxLayout()
-        
-        last_sync = config.get_last_update_check() or "Never"
-        self.last_sync_label = QLabel(f"Last sync check: {last_sync}")
-        self.last_sync_label.setStyleSheet("color: #666;")
-        info_layout.addWidget(self.last_sync_label)
-        
-        info_group.setLayout(info_layout)
-        layout.addWidget(info_group)
+        # Status
+        self.advanced_status = QLabel("")
+        self.advanced_status.setStyleSheet("color: #666; padding: 5px;")
+        layout.addWidget(self.advanced_status)
         
         layout.addStretch()
         tab.setLayout(layout)
         return tab
+    
+    def _load_advanced_decks(self):
+        """Load decks into advanced deck selector"""
+        self.advanced_deck_selector.clear()
+        self.advanced_deck_selector.addItem("-- Select a deck --", None)
+        
+        downloaded_decks = config.get_downloaded_decks()
+        
+        for deck_id, deck_info in downloaded_decks.items():
+            anki_deck_id = deck_info.get('anki_deck_id')
+            deck_name = f"Deck {deck_id[:8]}"
+            
+            if anki_deck_id and mw.col:
+                try:
+                    deck = mw.col.decks.get(int(anki_deck_id))
+                    if deck:
+                        deck_name = deck['name']
+                except:
+                    pass
+            
+            version = deck_info.get('version', '?')
+            self.advanced_deck_selector.addItem(f"{deck_name} (v{version})", deck_id)
+    
+    def _get_selected_deck(self):
+        """Get selected deck ID and name for advanced operations"""
+        deck_id = self.advanced_deck_selector.currentData()
+        if not deck_id:
+            QMessageBox.warning(self, "No Deck", "Please select a deck first.")
+            return None, None
+        
+        deck_info = config.get_downloaded_decks().get(deck_id, {})
+        anki_deck_id = deck_info.get('anki_deck_id')
+        deck_name = f"Deck {deck_id[:8]}"
+        
+        if anki_deck_id and mw.col:
+            try:
+                deck = mw.col.decks.get(int(anki_deck_id))
+                if deck:
+                    deck_name = deck['name']
+            except:
+                pass
+        
+        return deck_id, deck_name
+    
+    def _open_card_history(self):
+        """Open card history dialog"""
+        deck_id, deck_name = self._get_selected_deck()
+        if not deck_id:
+            return
+        
+        try:
+            from .history_dialog import DeckHistoryBrowser
+            dialog = DeckHistoryBrowser(deck_id, deck_name, self)
+            dialog.exec()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open history: {e}")
+    
+    def _open_suggestions(self):
+        """Open suggestion dialog"""
+        deck_id, deck_name = self._get_selected_deck()
+        if not deck_id:
+            return
+        
+        try:
+            from .suggestion_dialog import CardSuggestionBrowser
+            dialog = CardSuggestionBrowser(deck_id, deck_name, self)
+            dialog.exec()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open suggestions: {e}")
+    
+    def _open_sync_changes(self):
+        """Open sync changes dialog"""
+        deck_id, deck_name = self._get_selected_deck()
+        if not deck_id:
+            return
+        
+        try:
+            from .sync_dialog import SyncDialog
+            dialog = SyncDialog(deck_id, deck_name, self)
+            dialog.exec()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open sync: {e}")
+    
+    def _sync_tags(self):
+        """Sync tags with server"""
+        deck_id, deck_name = self._get_selected_deck()
+        if not deck_id:
+            return
+        
+        self.advanced_status.setText("⏳ Syncing tags...")
+        try:
+            if ensure_valid_token():
+                result = api.sync_tags(deck_id, action="pull")
+                if result.get('success'):
+                    self.advanced_status.setText(f"✓ Tags synced: +{result.get('tags_added', 0)} -{result.get('tags_removed', 0)}")
+                else:
+                    self.advanced_status.setText("❌ Tag sync failed")
+            else:
+                self.advanced_status.setText("❌ Not logged in")
+        except Exception as e:
+            self.advanced_status.setText(f"❌ Error: {e}")
+    
+    def _sync_suspend(self):
+        """Sync suspend state with server"""
+        deck_id, deck_name = self._get_selected_deck()
+        if not deck_id:
+            return
+        
+        self.advanced_status.setText("⏳ Syncing suspend state...")
+        try:
+            if ensure_valid_token():
+                result = api.sync_suspend_state(deck_id, action="pull")
+                if result.get('success'):
+                    self.advanced_status.setText(f"✓ Suspend state synced: {result.get('cards_updated', 0)} cards")
+                else:
+                    self.advanced_status.setText("❌ Suspend sync failed")
+            else:
+                self.advanced_status.setText("❌ Not logged in")
+        except Exception as e:
+            self.advanced_status.setText(f"❌ Error: {e}")
+    
+    def _sync_media(self):
+        """Sync media with server"""
+        deck_id, deck_name = self._get_selected_deck()
+        if not deck_id:
+            return
+        
+        self.advanced_status.setText("⏳ Syncing media...")
+        try:
+            if ensure_valid_token():
+                result = api.sync_media(deck_id, action="download")
+                if result.get('success'):
+                    self.advanced_status.setText(f"✓ Media synced: {result.get('files_downloaded', 0)} files")
+                else:
+                    self.advanced_status.setText("❌ Media sync failed")
+            else:
+                self.advanced_status.setText("❌ Not logged in")
+        except Exception as e:
+            self.advanced_status.setText(f"❌ Error: {e}")
+    
+    def _sync_note_types(self):
+        """Sync note types with server"""
+        deck_id, deck_name = self._get_selected_deck()
+        if not deck_id:
+            return
+        
+        self.advanced_status.setText("⏳ Syncing note types...")
+        try:
+            if ensure_valid_token():
+                result = api.sync_note_types(deck_id, action="get")
+                if result.get('success'):
+                    self.advanced_status.setText(f"✓ Note types synced: {result.get('types_updated', 0)} types")
+                else:
+                    self.advanced_status.setText("❌ Note type sync failed")
+            else:
+                self.advanced_status.setText("❌ Not logged in")
+        except Exception as e:
+            self.advanced_status.setText(f"❌ Error: {e}")
     
     def load_settings(self):
         """Load current settings into UI"""
@@ -258,12 +453,6 @@ class SettingsDialog(QDialog):
         
         # Protected fields tab - load decks
         self.load_deck_list()
-        
-        # Sync tab - these are placeholders for future config
-        self.sync_tags.setChecked(True)
-        self.sync_suspend.setChecked(True)
-        self.sync_note_types.setChecked(True)
-
     
     def load_deck_list(self):
         """Load downloaded decks into deck selector"""
