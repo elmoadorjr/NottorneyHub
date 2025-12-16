@@ -16,6 +16,44 @@ from ..api_client import api, set_access_token, NottorneyAPIError
 from ..config import config
 
 
+def ensure_valid_token():
+    """
+    Ensure we have a valid access token, refreshing if needed.
+    Returns True if we have a valid token, False otherwise.
+    """
+    token = config.get_access_token()
+    if not token:
+        return False
+    
+    # Try to refresh if we have a refresh token
+    refresh_token = config.get_refresh_token()
+    if refresh_token:
+        try:
+            result = api.refresh_token(refresh_token)
+            if result.get('success'):
+                new_access = result.get('access_token')
+                new_refresh = result.get('refresh_token', refresh_token)
+                expires_at = result.get('expires_at')
+                
+                if new_access:
+                    config.save_tokens(new_access, new_refresh, expires_at)
+                    set_access_token(new_access)
+                    print("✓ Token refreshed successfully")
+                    return True
+        except Exception as e:
+            print(f"✗ Token refresh failed: {e}")
+    
+    # Use existing token
+    set_access_token(token)
+    return True
+
+
+def is_auth_error(error):
+    """Check if an error is an authentication error"""
+    error_str = str(error).lower()
+    return any(x in error_str for x in ['expired', 'invalid', 'token', 'unauthorized', '401', 'auth'])
+
+
 class SettingsDialog(QDialog):
     """Settings dialog with multiple configuration tabs"""
     
@@ -769,10 +807,14 @@ class SettingsDialog(QDialog):
             
             self.admin_log(f"📦 Found {len(changes)} cards to push")
             
-            # Set token
-            token = config.get_access_token()
-            if token:
-                set_access_token(token)
+            # Validate and refresh token before starting long operation
+            self.admin_log(f"🔑 Validating token...")
+            if not ensure_valid_token():
+                QMessageBox.warning(
+                    self, "Not Logged In", 
+                    "Please login first via the main Nottorney dialog."
+                )
+                return
             
             # Chunk the changes for large pushes (500 per batch - backend uses batch ops)
             CHUNK_SIZE = 500
@@ -933,10 +975,14 @@ class SettingsDialog(QDialog):
             
             self.admin_log(f"📦 Found {len(cards)} cards to import")
             
-            # Set token
-            token = config.get_access_token()
-            if token:
-                set_access_token(token)
+            # Validate and refresh token before starting long operation
+            self.admin_log(f"🔑 Validating token...")
+            if not ensure_valid_token():
+                QMessageBox.warning(
+                    self, "Not Logged In", 
+                    "Please login first via the main Nottorney dialog."
+                )
+                return
             
             # Chunk the cards for large imports (500 per batch - backend uses batch ops)
             CHUNK_SIZE = 500
@@ -1014,6 +1060,12 @@ class SettingsDialog(QDialog):
                         break  # Success, exit retry loop
                         
                     except Exception as batch_error:
+                        # Check if this is an auth error - don't retry auth errors
+                        if is_auth_error(batch_error):
+                            self.admin_log(f"❌ Authentication error: {batch_error}")
+                            self.admin_log(f"🔑 Please re-login and try again")
+                            raise batch_error
+                        
                         retry_count = attempt + 1
                         if retry_count < max_retries:
                             self.admin_log(f"⚠ Batch {batch_num} failed (attempt {retry_count}/{max_retries}), retrying...")
