@@ -1,7 +1,8 @@
 """
-Simplified Main Dialog for Nottorney Addon
+Simplified Main Dialog for AnkiPH Addon
 Single unified dialog with minimal UI - AnkiHub-style simplicity
-Version: 2.2.0
+ENHANCED: Added tiered access support (v3.0)
+Version: 3.0.0
 """
 
 from aqt.qt import (
@@ -10,19 +11,20 @@ from aqt.qt import (
     QWidget, QProgressDialog
 )
 from aqt import mw
+from aqt.utils import showInfo
 
-from ..api_client import api, set_access_token, NottorneyAPIError
+from ..api_client import api, set_access_token, AnkiPHAPIError, AccessTier, can_sync_updates, show_upgrade_prompt
 from ..config import config
 from ..deck_importer import import_deck_with_progress
 from ..update_checker import update_checker
 
 
-class NottorneyMainDialog(QDialog):
-    """Simplified single dialog for Nottorney operations"""
+class AnkiPHMainDialog(QDialog):
+    """Simplified single dialog for AnkiPH operations"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("⚖️ Nottorney")
+        self.setWindowTitle("⚖️ AnkiPH")
         self.setMinimumSize(500, 400)
         self.import_in_progress = False
         self.progress_dialog = None
@@ -51,7 +53,7 @@ class NottorneyMainDialog(QDialog):
         layout.setSpacing(10)
         
         # Title
-        title = QLabel("Nottorney")
+        title = QLabel("AnkiPH")
         title.setStyleSheet("font-size: 20px; font-weight: bold; padding: 10px;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
@@ -105,6 +107,17 @@ class NottorneyMainDialog(QDialog):
         user_label = QLabel("Logged in")
         user_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
         user_bar.addWidget(user_label)
+        
+        # Subscription status (v3.0)
+        status_text = config.get_access_status_text()
+        if config.has_full_access():
+            status_style = "color: #4CAF50; font-size: 11px; padding: 2px 8px; background: #E8F5E9; border-radius: 3px;"
+        else:
+            status_style = "color: #FF9800; font-size: 11px; padding: 2px 8px; background: #FFF3E0; border-radius: 3px;"
+        
+        self.subscription_label = QLabel(status_text)
+        self.subscription_label.setStyleSheet(status_style)
+        user_bar.addWidget(self.subscription_label)
         
         user_bar.addStretch()
         
@@ -196,7 +209,7 @@ class NottorneyMainDialog(QDialog):
             else:
                 QMessageBox.warning(self, "Login Failed", result.get('message', 'Login failed'))
         
-        except NottorneyAPIError as e:
+        except AnkiPHAPIError as e:
             QMessageBox.critical(self, "Error", str(e))
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Login failed: {e}")
@@ -287,6 +300,17 @@ class NottorneyMainDialog(QDialog):
                 
                 self.status_label.setText("All synced, no updates")
                 QMessageBox.information(self, "Sync Complete", "All decks are up to date!")
+                return
+            
+            # Check access before applying updates (v3.0)
+            if not config.has_full_access():
+                # Free tier - check if they can sync
+                showInfo(
+                    "Free tier decks don't receive updates.\n\n"
+                    "Subscribe to AnkiPH or get the Collection to receive the latest content!"
+                )
+                show_upgrade_prompt()
+                self.status_label.setText("Upgrade required for updates")
                 return
             
             # Apply updates

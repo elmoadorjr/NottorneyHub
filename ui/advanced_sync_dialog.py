@@ -1,5 +1,5 @@
 """
-Advanced Sync Dialog for Nottorney Addon
+Advanced Sync Dialog for AnkiPH Addon
 Features: Tag sync, Suspend state sync, Media sync, Note type sync
 Version: 2.1.0
 """
@@ -12,7 +12,7 @@ from aqt.qt import (
 )
 from aqt import mw
 
-from ..api_client import api, set_access_token, NottorneyAPIError
+from ..api_client import api, set_access_token, AnkiPHAPIError
 from ..config import config
 
 
@@ -393,7 +393,7 @@ class AdvancedSyncDialog(QDialog):
                 self.status_label.setText("❌ Sync failed")
                 QMessageBox.warning(self, "Sync Failed", result.get('message', 'Unknown error'))
         
-        except NottorneyAPIError as e:
+        except AnkiPHAPIError as e:
             self.status_label.setText(f"❌ {str(e)}")
             QMessageBox.critical(self, "API Error", str(e))
         
@@ -475,7 +475,7 @@ class AdvancedSyncDialog(QDialog):
                 self.status_label.setText("❌ Sync failed")
                 QMessageBox.warning(self, "Sync Failed", result.get('message', 'Unknown error'))
         
-        except NottorneyAPIError as e:
+        except AnkiPHAPIError as e:
             self.status_label.setText(f"❌ {str(e)}")
             QMessageBox.critical(self, "API Error", str(e))
         
@@ -571,7 +571,7 @@ class AdvancedSyncDialog(QDialog):
                 self.status_label.setText("❌ Sync failed")
                 QMessageBox.warning(self, "Sync Failed", result.get('message', 'Unknown error'))
         
-        except NottorneyAPIError as e:
+        except AnkiPHAPIError as e:
             self.status_label.setText(f"❌ {str(e)}")
             QMessageBox.critical(self, "API Error", str(e))
         
@@ -660,7 +660,7 @@ class AdvancedSyncDialog(QDialog):
                 self.status_label.setText("❌ Sync failed")
                 QMessageBox.warning(self, "Sync Failed", result.get('message', 'Unknown error'))
         
-        except NottorneyAPIError as e:
+        except AnkiPHAPIError as e:
             self.status_label.setText(f"❌ {str(e)}")
             QMessageBox.critical(self, "API Error", str(e))
         

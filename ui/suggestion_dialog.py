@@ -1,5 +1,5 @@
 """
-Card Suggestion Dialog for Nottorney Addon
+Card Suggestion Dialog for AnkiPH Addon
 Features: Submit card improvement suggestions to deck maintainers
 Version: 2.1.0
 """
@@ -12,7 +12,7 @@ from aqt.qt import (
 )
 from aqt import mw
 
-from ..api_client import api, set_access_token, NottorneyAPIError
+from ..api_client import api, set_access_token, AnkiPHAPIError
 from ..config import config
 
 
@@ -248,7 +248,7 @@ class SuggestionDialog(QDialog):
                 self.status_label.setText(f"❌ {error_msg}")
                 QMessageBox.warning(self, "Submission Failed", error_msg)
         
-        except NottorneyAPIError as e:
+        except AnkiPHAPIError as e:
             error_msg = str(e)
             if e.status_code == 401:
                 error_msg = "Session expired"

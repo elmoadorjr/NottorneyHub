@@ -1,5 +1,5 @@
 """
-Update checking service for Nottorney addon
+Update checking service for AnkiPH addon
 Checks for deck updates in the background and notifies users
 Version: 2.1.0
 """
@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 import traceback
 import threading
 
-from .api_client import api, NottorneyAPIError, set_access_token
+from .api_client import api, AnkiPHAPIError, set_access_token
 from .config import config
 
 
@@ -136,7 +136,7 @@ class UpdateChecker:
             
             return updates_dict
         
-        except NottorneyAPIError as e:
+        except AnkiPHAPIError as e:
             error_msg = str(e)
             if e.status_code == 401:
                 error_msg = "Session expired. Please login again."
@@ -194,7 +194,7 @@ class UpdateChecker:
                 lines.append(f"  {summary}")
             lines.append("")
         
-        lines.append("Open Nottorney to update your decks.")
+        lines.append("Open AnkiPH to update your decks.")
         
         showInfo("\n".join(lines))
     
@@ -348,7 +348,7 @@ class UpdateChecker:
         
         # Show summary
         if success_count > 0:
-            tooltip(f"⚖️ Nottorney: Updated {success_count} deck(s)", period=3000)
+            tooltip(f"\u2696\ufe0f AnkiPH: Updated {success_count} deck(s)", period=3000)
         
         if fail_count > 0:
             print(f"⚠ {fail_count} deck(s) failed to auto-update")

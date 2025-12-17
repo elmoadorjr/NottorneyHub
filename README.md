@@ -1,6 +1,6 @@
-# Nottorney Anki Addon
+# AnkiPH Anki Addon
 
-**Version:** 2.1.0  
+**Version:** 3.0.0  
 **Updated:** December 17, 2025  
 **Compatible with:** Anki 24.x - 25.x (PyQt6)
 
@@ -8,12 +8,13 @@
 
 ## Overview
 
-Nottorney is an AnkiHub-style deck syncing addon for Philippine law students. It provides:
+AnkiPH is an AnkiHub-style deck syncing addon for Philippine students. It provides:
 
-- **Deck subscription & syncing** - Subscribe to law decks and receive updates automatically
+- **Deck subscription & syncing** - Subscribe to decks and receive updates automatically
 - **Automatic updates** - Checks for deck updates on startup
 - **Progress tracking** - Syncs study progress to server
 - **Notifications** - Receive announcements from deck publishers
+- **Tiered access** - Collection Owner, Subscriber, Free Tier, and Legacy Purchase support
 
 ---
 
@@ -21,7 +22,7 @@ Nottorney is an AnkiHub-style deck syncing addon for Philippine law students. It
 
 1. **Install** the addon in Anki
 2. **Restart** Anki
-3. **Open** → Tools → ⚖️ Nottorney → Open Nottorney
+3. **Open** → Tools → ⚖️ AnkiPH
 4. **Login** with your account
 5. **Browse** and download decks
 6. **Study** - Updates sync automatically on startup
@@ -38,6 +39,7 @@ Nottorney is an AnkiHub-style deck syncing addon for Philippine law students. It
 - ✅ Manual update application
 - ✅ Notifications system
 - ✅ Progress syncing
+- ✅ Tiered access (Collection Owner, Subscriber, Free Tier)
 
 ### Advanced Features (UI Ready, API Verification Needed)
 - ⚠️ Push/Pull card changes
@@ -59,8 +61,8 @@ Nottorney is an AnkiHub-style deck syncing addon for Philippine law students. It
 ## File Structure
 
 ```
-Nottorney_Addon/
-├── __init__.py              # Entry point (v2.1.0)
+AnkiPH_Addon/
+├── __init__.py              # Entry point (v3.0.0)
 ├── api_client.py            # API client (20+ endpoints)
 ├── config.py                # Configuration management
 ├── deck_importer.py         # .apkg import
@@ -70,7 +72,8 @@ Nottorney_Addon/
 ├── manifest.json            # Addon metadata
 └── ui/
     ├── __init__.py
-    ├── tabbed_dialog.py     # Main UI (My Decks, Browse, Updates, Notifications)
+    ├── main_dialog.py       # Simple unified dialog
+    ├── tabbed_dialog.py     # Full UI (My Decks, Browse, Updates, Notifications)
     ├── settings_dialog.py   # Settings + Admin features
     ├── sync_dialog.py       # Push/Pull changes
     ├── history_dialog.py    # Card history viewer
@@ -82,7 +85,7 @@ Nottorney_Addon/
 
 ## Configuration
 
-Access config via: **Tools → Add-ons → Nottorney → Config**
+Access config via: **Tools → Add-ons → AnkiPH → Config**
 
 ```json
 {
@@ -99,17 +102,23 @@ Access config via: **Tools → Add-ons → Nottorney → Config**
 ### "Update check failed"
 1. Check internet connection
 2. Verify you're logged in
-3. Try: Tools → ⚖️ Nottorney → Check for Updates
+3. Try: Tools → ⚖️ AnkiPH → Check for Updates
 
 ### "Session expired"
-1. Open Nottorney
+1. Open AnkiPH
 2. Click Logout then Login again
 
 ---
 
 ## Version History
 
-### v2.1.0 (December 17, 2025) - CURRENT
+### v3.0.0 (December 17, 2025) - CURRENT
+- 🎨 Rebranded from Nottorney to AnkiPH
+- ✨ Added tiered access support (Collection Owner, Subscriber, Free Tier, Legacy)
+- ✨ Subscription status display in UI
+- ✨ Upgrade prompts for free tier users
+
+### v2.1.0 (December 17, 2025)
 - 🔧 Synchronized version numbers across all files
 - 🔧 Removed deprecated UI mode toggle (always tabbed now)
 - 🔧 Cleaned up orphaned single_dialog references
@@ -136,8 +145,8 @@ Access config via: **Tools → Add-ons → Nottorney → Config**
 ## Support
 
 - **Homepage:** https://nottorney.lovable.app
-- **API Documentation:** See `nottorney_api_docs_Version2.md`
+- **API Documentation:** See `ankiph_api_docs_Version3.md`
 
 ---
 
-**Stay Updated. Study Smart. Pass the Bar! 📚⚖️**
+**Stay Updated. Study Smart! 📚⚖️**

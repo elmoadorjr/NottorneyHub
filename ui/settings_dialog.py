@@ -1,5 +1,5 @@
 """
-Settings Dialog for Nottorney Addon
+Settings Dialog for AnkiPH Addon
 Features: General settings, Protected Fields, Sync, Admin (for admins)
 Version: 2.1.0
 """
@@ -12,7 +12,7 @@ from aqt.qt import (
 )
 from aqt import mw
 
-from ..api_client import api, set_access_token, NottorneyAPIError
+from ..api_client import api, set_access_token, AnkiPHAPIError
 from ..config import config
 
 
@@ -59,7 +59,7 @@ class SettingsDialog(QDialog):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("⚙️ Nottorney Settings")
+        self.setWindowTitle("⚙️ AnkiPH Settings")
         self.setMinimumSize(600, 500)
         self.setup_ui()
         self.load_settings()
@@ -589,7 +589,7 @@ class SettingsDialog(QDialog):
             else:
                 QMessageBox.warning(self, "Error", "Failed to fetch from server.")
         
-        except NottorneyAPIError as e:
+        except AnkiPHAPIError as e:
             QMessageBox.critical(self, "API Error", str(e))
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to fetch: {e}")
@@ -775,21 +775,21 @@ class SettingsDialog(QDialog):
             if deck_name == "Default":
                 continue
             
-            # Check if this deck is already tracked (has a Nottorney deck_id)
+            # Check if this deck is already tracked (has a AnkiPH deck_id)
             downloaded = config.get_downloaded_decks()
-            nottorney_id = None
+            ankiph_id = None
             for nid, info in downloaded.items():
                 if info.get('anki_deck_id') == anki_id:
-                    nottorney_id = nid
+                    ankiph_id = nid
                     break
             
             # Store anki_id as data since we need to look up cards by it
             display_text = f"{deck_name}"
-            if nottorney_id:
-                display_text += f" (ID: {nottorney_id[:8]}...)"
+            if ankiph_id:
+                display_text += f" (ID: {ankiph_id[:8]}...)"
             
-            # Store tuple of (anki_id, nottorney_id)
-            self.admin_deck_selector.addItem(display_text, (anki_id, nottorney_id))
+            # Store tuple of (anki_id, ankiph_id)
+            self.admin_deck_selector.addItem(display_text, (anki_id, ankiph_id))
     
     def admin_log(self, message):
         """Add message to admin status log"""
@@ -818,11 +818,11 @@ class SettingsDialog(QDialog):
             self.admin_unlink_btn.setEnabled(False)
             return
         
-        anki_deck_id, existing_nottorney_id = deck_data
+        anki_deck_id, existing_ankiph_id = deck_data
         
-        if existing_nottorney_id:
-            # This deck already has a Nottorney ID - auto-fill and make read-only
-            self.admin_deck_id_input.setText(existing_nottorney_id)
+        if existing_ankiph_id:
+            # This deck already has a AnkiPH ID - auto-fill and make read-only
+            self.admin_deck_id_input.setText(existing_ankiph_id)
             self.admin_deck_id_input.setReadOnly(True)
             self.admin_deck_id_input.setStyleSheet("background-color: #333; color: #aaa;")
             self.admin_deck_id_input.setToolTip("This deck is already linked to a server deck. Click 'Unlink' to remove.")
@@ -848,9 +848,9 @@ class SettingsDialog(QDialog):
         if not deck_data:
             return
         
-        anki_deck_id, existing_nottorney_id = deck_data
+        anki_deck_id, existing_ankiph_id = deck_data
         
-        if not existing_nottorney_id:
+        if not existing_ankiph_id:
             QMessageBox.information(self, "Not Linked", "This deck is not linked to a server deck.")
             return
         
@@ -868,7 +868,7 @@ class SettingsDialog(QDialog):
             self, "Confirm Unlink",
             f"This will remove the link between:\n\n"
             f"Anki Deck: {deck_name}\n"
-            f"Server ID: {existing_nottorney_id}\n\n"
+            f"Server ID: {existing_ankiph_id}\n\n"
             "The deck will remain in Anki, but you'll need to re-link it "
             "or create a new server deck to push/import.\n\n"
             "This is useful if the server deck was deleted.\n\n"
@@ -880,7 +880,7 @@ class SettingsDialog(QDialog):
             return
         
         # Remove from tracking
-        success = config.remove_downloaded_deck(existing_nottorney_id)
+        success = config.remove_downloaded_deck(existing_ankiph_id)
         
         if success:
             self.admin_log(f"✓ Unlinked deck: {deck_name}")
@@ -910,17 +910,17 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "No Deck Selected", "Please select a deck first.")
             return
         
-        anki_deck_id, existing_nottorney_id = deck_data
+        anki_deck_id, existing_ankiph_id = deck_data
         
         # Get deck_id from input or existing mapping
         deck_id = self.admin_deck_id_input.text().strip()
-        if not deck_id and existing_nottorney_id:
-            deck_id = existing_nottorney_id
+        if not deck_id and existing_ankiph_id:
+            deck_id = existing_ankiph_id
         
         if not deck_id:
             QMessageBox.warning(
                 self, "Deck ID Required", 
-                "Please enter the Server Deck ID (UUID from Nottorney database)."
+                "Please enter the Server Deck ID (UUID from AnkiPH database)."
             )
             return
         
@@ -985,7 +985,7 @@ class SettingsDialog(QDialog):
             if not ensure_valid_token():
                 QMessageBox.warning(
                     self, "Not Logged In", 
-                    "Please login first via the main Nottorney dialog."
+                    "Please login first via the main AnkiPH dialog."
                 )
                 return
             
@@ -1038,7 +1038,7 @@ class SettingsDialog(QDialog):
                 f"New version: {version}"
             )
                 
-        except NottorneyAPIError as e:
+        except AnkiPHAPIError as e:
             self.admin_log(f"❌ API Error: {e}")
             QMessageBox.critical(self, "API Error", str(e))
         except Exception as e:
@@ -1052,7 +1052,7 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "No Deck Selected", "Please select a deck first.")
             return
         
-        anki_deck_id, existing_nottorney_id = deck_data
+        anki_deck_id, existing_ankiph_id = deck_data
         is_new_deck = self.admin_create_new.isChecked()
         
         # For new deck, require title. For existing deck, require ID.
@@ -1070,8 +1070,8 @@ class SettingsDialog(QDialog):
         else:
             # Get deck_id from input or existing mapping
             deck_id = self.admin_deck_id_input.text().strip()
-            if not deck_id and existing_nottorney_id:
-                deck_id = existing_nottorney_id
+            if not deck_id and existing_ankiph_id:
+                deck_id = existing_ankiph_id
             
             if not deck_id:
                 QMessageBox.warning(
@@ -1143,7 +1143,7 @@ class SettingsDialog(QDialog):
                     "note_type": note.note_type()['name'],
                     "fields": fields,
                     "tags": note.tags,
-                    "deck_path": deck_path  # e.g., "Nottorney::Political Law::Constitutional Law I"
+                    "deck_path": deck_path  # e.g., "AnkiPH::Political Law::Constitutional Law I"
                 })
             
             self.admin_log(f"📦 Found {len(cards)} cards to import")
@@ -1153,7 +1153,7 @@ class SettingsDialog(QDialog):
             if not ensure_valid_token():
                 QMessageBox.warning(
                     self, "Not Logged In", 
-                    "Please login first via the main Nottorney dialog."
+                    "Please login first via the main AnkiPH dialog."
                 )
                 return
             
@@ -1275,7 +1275,7 @@ class SettingsDialog(QDialog):
                 f"Version: {version}"
             )
                 
-        except NottorneyAPIError as e:
+        except AnkiPHAPIError as e:
             self.admin_log(f"❌ API Error: {e}")
             # Save partial progress
             if created_deck_id and total_imported > 0:

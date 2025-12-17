@@ -1,6 +1,6 @@
 """
-Nottorney Anki Addon - Simplified Version
-PyQt6 Compatible - v2.1.0
+AnkiPH Anki Addon - Simplified Version
+PyQt6 Compatible - v3.0.0
 SIMPLIFIED: Removed minimal UI mode, added auto-sync on startup
 """
 
@@ -17,8 +17,8 @@ try:
     from .api_client import api, set_access_token
     from .update_checker import update_checker
     
-    # Use simplified main dialog (v2.2.0)
-    from .ui.main_dialog import NottorneyMainDialog as MainDialog
+    # Use simplified main dialog (v3.0.0)
+    from .ui.main_dialog import AnkiPHMainDialog as MainDialog
         
 except ImportError as e:
     # Defer error display until Anki is ready (mw might not be initialized yet)
@@ -26,14 +26,14 @@ except ImportError as e:
     
     def show_startup_error():
         from aqt.utils import showInfo
-        showInfo(f"Nottorney addon import error: {_import_error}\n\nPlease check that all files are present.")
+        showInfo(f"AnkiPH addon import error: {_import_error}\n\nPlease check that all files are present.")
     
     from aqt import gui_hooks
     gui_hooks.main_window_did_init.append(show_startup_error)
     raise
 
-ADDON_NAME = "Nottorney"
-ADDON_VERSION = "2.2.0"
+ADDON_NAME = "AnkiPH"
+ADDON_VERSION = "3.0.0"
 
 
 def show_settings_dialog():
@@ -70,7 +70,7 @@ def show_main_dialog():
             except Exception as e: 
                 print(f"Sync failed (non-critical): {e}")
     except Exception as e:
-        showInfo(f"Error opening Nottorney dialog:\n{str(e)}")
+        showInfo(f"Error opening AnkiPH dialog:\n{str(e)}")
         print(f"Dialog error: {e}")
         import traceback
         traceback.print_exc()
@@ -95,7 +95,7 @@ def on_main_window_did_init():
         # Auto-apply updates if any available
         if updates and len(updates) > 0:
             count = len(updates)
-            tooltip(f"⚖️ Nottorney: {count} deck update(s) available")
+            tooltip(f"⚖️ AnkiPH: {count} deck update(s) available")
             
             # Try to auto-apply updates silently
             try:
@@ -104,23 +104,23 @@ def on_main_window_did_init():
                 print(f"Auto-apply updates failed (non-critical): {e}")
                 
     except Exception as e:
-        print(f"Nottorney startup check failed (non-critical): {e}")
+        print(f"AnkiPH startup check failed (non-critical): {e}")
 
 
 def setup_menu():
     """Setup menu in Anki - single action opens main dialog"""
     try:
-        # Add single Nottorney action to Tools menu (no submenu)
-        action = QAction("⚖️ Nottorney", mw)
+        # Add single AnkiPH action to Tools menu (no submenu)
+        action = QAction("⚖️ AnkiPH", mw)
         action.triggered.connect(show_main_dialog)
         mw.form.menuTools.addAction(action)
         
-        print(f"✓ Nottorney addon v{ADDON_VERSION} loaded successfully")
+        print(f"✓ AnkiPH addon v{ADDON_VERSION} loaded successfully")
         print(f"  Auto-update check: {config.get_auto_check_updates()}")
         
     except Exception as e:
-        print(f"✗ Error setting up Nottorney menu: {e}")
-        showInfo(f"Nottorney addon failed to load:\n{str(e)}")
+        print(f"✗ Error setting up AnkiPH menu: {e}")
+        showInfo(f"AnkiPH addon failed to load:\n{str(e)}")
 
 
 # Setup hooks
@@ -128,6 +128,6 @@ try:
     setup_menu()
     gui_hooks.main_window_did_init.append(on_main_window_did_init)
 except Exception as e:
-    print(f"✗ Fatal error loading Nottorney addon: {e}")
-    showInfo(f"Fatal error loading Nottorney addon:\n{str(e)}")
+    print(f"✗ Fatal error loading AnkiPH addon: {e}")
+    showInfo(f"Fatal error loading AnkiPH addon:\n{str(e)}")
 

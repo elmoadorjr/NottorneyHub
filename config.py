@@ -1,8 +1,9 @@
 """
-Configuration management for the Nottorney addon
+Configuration management for the AnkiPH addon
 FIXED: Profile-specific deck tracking using collection metadata
 ENHANCED: Added update checking, notification tracking, and sync state management
-Version: 2.1.0
+ENHANCED: Added tiered access support (collection owner, subscriber, free tier, legacy)
+Version: 3.0.0
 """
 
 from aqt import mw
@@ -14,7 +15,7 @@ class Config:
     """Manages addon configuration and authentication state"""
     
     def __init__(self):
-        self.addon_name = "Nottorney_Addon"
+        self.addon_name = "AnkiPH_Addon"
         self._config_cache = None
         self._cache_timestamp = 0
         self._cache_timeout = 1.0  # 1 second cache
@@ -80,6 +81,11 @@ class Config:
             "expires_at": None,
             "user": None,
             "is_admin": False,
+            # Tiered access fields (v3.0)
+            "owns_collection": False,
+            "has_subscription": False,
+            "subscription_expires_at": None,
+            "subscription_tier": "free",
             "ui_mode": "tabbed",
             "last_notification_check": None,
             "unread_notification_count": 0,
@@ -126,7 +132,7 @@ class Config:
             return default
         
         try:
-            meta_key = f"nottorney_{key}"
+            meta_key = f"ankiph_{key}"
             value = mw.col.get_config(meta_key, default)
             return value
         except Exception as e:
@@ -140,7 +146,7 @@ class Config:
             return False
         
         try:
-            meta_key = f"nottorney_{key}"
+            meta_key = f"ankiph_{key}"
             mw.col.set_config(meta_key, value)
             return True
         except Exception as e:
@@ -187,17 +193,33 @@ class Config:
         Save user data from login response
         
         Args:
-            user_data: Dict containing user info (id, email, full_name, is_admin)
+            user_data: Dict containing user info (id, email, full_name, is_admin,
+                       owns_collection, has_subscription, subscription_expires_at, subscription_tier)
         """
         cfg = self._get_config()
         cfg['user'] = user_data
         cfg['is_admin'] = user_data.get('is_admin', False)
         
+        # Save tiered access fields (v3.0)
+        cfg['owns_collection'] = user_data.get('owns_collection', False)
+        cfg['has_subscription'] = user_data.get('has_subscription', False)
+        cfg['subscription_expires_at'] = user_data.get('subscription_expires_at')
+        cfg['subscription_tier'] = user_data.get('subscription_tier', 'free')
+        
         success = self._save_config(cfg)
         if success:
             admin_status = 'Admin' if cfg['is_admin'] else 'User'
-            print(f"✓ User data saved: {user_data.get('email')} ({admin_status})")
+            tier_info = self._get_tier_display()
+            print(f"✓ User data saved: {user_data.get('email')} ({admin_status}, {tier_info})")
         return success
+    
+    def _get_tier_display(self) -> str:
+        """Get human-readable tier display for logging"""
+        if self.owns_collection():
+            return "Collection Owner"
+        if self.has_active_subscription():
+            return "Subscriber"
+        return "Free Tier"
     
     def is_admin(self) -> bool:
         """Check if current user has admin privileges"""
@@ -215,6 +237,11 @@ class Config:
         cfg['expires_at'] = None
         cfg['user'] = None
         cfg['is_admin'] = False
+        # Clear tiered access fields (v3.0)
+        cfg['owns_collection'] = False
+        cfg['has_subscription'] = False
+        cfg['subscription_expires_at'] = None
+        cfg['subscription_tier'] = 'free'
         
         success = self._save_config(cfg)
         if success:
@@ -223,6 +250,77 @@ class Config:
             print("✗ Failed to clear tokens")
         return success
     
+    # === TIERED ACCESS (v3.0) ===
+    
+    def owns_collection(self) -> bool:
+        """Check if user owns the AnkiPH collection (₱1,000 one-time purchase)"""
+        return self._get_config().get('owns_collection', False)
+    
+    def has_subscription(self) -> bool:
+        """Check if user has a AnkiPH subscription (may be expired)"""
+        return self._get_config().get('has_subscription', False)
+    
+    def get_subscription_tier(self) -> str:
+        """Get subscription tier: 'free', 'standard', or 'premium'"""
+        return self._get_config().get('subscription_tier', 'free')
+    
+    def get_subscription_expires_at(self) -> str:
+        """Get subscription expiry timestamp (ISO format) or None"""
+        return self._get_config().get('subscription_expires_at')
+    
+    def has_active_subscription(self) -> bool:
+        """
+        Check if user has an active (non-expired) AnkiPH subscription.
+        
+        Returns:
+            True if user has subscription AND it hasn't expired
+        """
+        if not self.has_subscription():
+            return False
+        
+        expires_at = self.get_subscription_expires_at()
+        if not expires_at:
+            return False
+        
+        try:
+            expiry = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+            return expiry > datetime.now(expiry.tzinfo)
+        except (ValueError, TypeError):
+            # If we can't parse the date, assume still valid
+            return True
+    
+    def has_full_access(self) -> bool:
+        """
+        Check if user has full access to all decks.
+        
+        Returns:
+            True if user is collection owner OR has active subscription
+        """
+        return self.owns_collection() or self.has_active_subscription()
+    
+    def get_access_status_text(self) -> str:
+        """
+        Get human-readable subscription status for UI display.
+        
+        Returns:
+            Status string like "Collection Owner - Full Access" or "Free Tier - Limited Access"
+        """
+        if self.owns_collection():
+            return "Collection Owner - Full Access"
+        
+        if self.has_active_subscription():
+            expires = self.get_subscription_expires_at()
+            if expires:
+                # Format: "Subscriber - Expires: 2024-01-15"
+                try:
+                    expiry_date = expires[:10]  # Get YYYY-MM-DD
+                    return f"AnkiPH Subscriber - Expires: {expiry_date}"
+                except:
+                    pass
+            return "AnkiPH Subscriber - Active"
+        
+        return "Free Tier - Limited Access"
+    
     # === DOWNLOADED DECKS TRACKING (PROFILE-SPECIFIC) ===
     
     def save_downloaded_deck(self, deck_id, version, anki_deck_id):
@@ -230,7 +328,7 @@ class Config:
         Track a downloaded deck (PROFILE-SPECIFIC)
         
         Args:
-            deck_id: Nottorney deck ID
+            deck_id: AnkiPH deck ID
             version: Deck version
             anki_deck_id: Anki's internal deck ID
         """

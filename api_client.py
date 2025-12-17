@@ -1,12 +1,16 @@
 """
-Robust API client for Nottorney Add-on
+Robust API client for AnkiPH Add-on
 ENHANCED: Added update checking, notifications, and AnkiHub-parity endpoints
-Version: 2.1.0
+ENHANCED: Added tiered access support (AccessTier enum and access control)
+Version: 3.0.0
 """
 
 from __future__ import annotations
 import json
 from typing import Any, Dict, Optional, List
+from enum import Enum
+from datetime import datetime
+import webbrowser
 
 API_BASE = "https://ladvckxztcleljbiomcf.supabase.co/functions/v1"
 
@@ -19,7 +23,108 @@ except Exception:
     _HAS_REQUESTS = False
 
 
-class NottorneyAPIError(Exception):
+# === TIERED ACCESS SYSTEM (v3.0) ===
+
+class AccessTier(Enum):
+    """User access tier for AnkiPH"""
+    COLLECTION_OWNER = "collection_owner"  # Full access, owns decks forever
+    SUBSCRIBER = "subscriber"              # Full access via subscription
+    FREE_TIER = "free_tier"                # Limited to is_free decks only
+    LEGACY = "legacy_purchase"             # Individual deck purchases
+
+
+def check_access(user_data: dict, deck: dict) -> Optional[AccessTier]:
+    """
+    Determine user's access tier for a specific deck.
+    
+    Args:
+        user_data: Dict with owns_collection, has_subscription, subscription_expires_at
+        deck: Dict with access_type field from API response
+    
+    Returns:
+        AccessTier enum value, or None if no access
+    """
+    # Tier 1: Collection owners get everything
+    if user_data.get("owns_collection"):
+        return AccessTier.COLLECTION_OWNER
+    
+    # Tier 2: Active subscribers get everything
+    if user_data.get("has_subscription"):
+        expires = user_data.get("subscription_expires_at")
+        if expires:
+            try:
+                expiry = datetime.fromisoformat(expires.replace('Z', '+00:00'))
+                if expiry > datetime.now(expiry.tzinfo):
+                    return AccessTier.SUBSCRIBER
+            except (ValueError, TypeError):
+                # If can't parse, assume still valid
+                return AccessTier.SUBSCRIBER
+        else:
+            # No expiry set, assume active
+            return AccessTier.SUBSCRIBER
+    
+    # Tier 3: Free tier - only is_free subdecks
+    access_type = deck.get("access_type", "")
+    if access_type == "free_tier":
+        return AccessTier.FREE_TIER
+    
+    # Tier 4: Legacy individual purchases
+    if access_type == "legacy_purchase":
+        return AccessTier.LEGACY
+    
+    return None  # No access
+
+
+def can_sync_updates(tier: Optional[AccessTier]) -> bool:
+    """
+    Check if user's tier allows syncing updates.
+    Free tier users cannot sync updates - they only get initial download.
+    
+    Args:
+        tier: The user's AccessTier
+    
+    Returns:
+        True if user can sync updates, False otherwise
+    """
+    if tier is None:
+        return False
+    return tier in [AccessTier.COLLECTION_OWNER, AccessTier.SUBSCRIBER, AccessTier.LEGACY]
+
+
+def show_upgrade_prompt():
+    """
+    Show upgrade dialog when user tries to access paid content.
+    Opens browser to collection purchase or subscription page.
+    """
+    try:
+        from aqt.qt import QMessageBox
+        from aqt import mw
+        
+        dialog = QMessageBox(mw)
+        dialog.setWindowTitle("Upgrade Required")
+        dialog.setText(
+            "This deck requires a AnkiPH subscription or Collection purchase.\n\n"
+            "\u2022 Collection: \u20b11,000 one-time (own all decks forever)\n"
+            "\u2022 AnkiPH: \u20b1149/month (sync all decks)\n"
+        )
+        dialog.setIcon(QMessageBox.Icon.Information)
+        
+        collection_btn = dialog.addButton("Get Collection", QMessageBox.ButtonRole.ActionRole)
+        subscribe_btn = dialog.addButton("Subscribe", QMessageBox.ButtonRole.ActionRole)
+        dialog.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        
+        dialog.exec()
+        
+        clicked = dialog.clickedButton()
+        if clicked == collection_btn:
+            webbrowser.open("https://nottorney.com/collection")
+        elif clicked == subscribe_btn:
+            webbrowser.open("https://nottorney.com/premium")
+    except Exception as e:
+        print(f"\u2717 Failed to show upgrade prompt: {e}")
+
+
+class AnkiPHAPIError(Exception):
     """Custom exception for API errors"""
     def __init__(self, message: str, status_code: Optional[int] = None, details: Optional[Any] = None):
         super().__init__(message)
@@ -28,7 +133,7 @@ class NottorneyAPIError(Exception):
 
 
 class ApiClient:
-    """API client for Nottorney backend"""
+    """API client for AnkiPH backend"""
     
     def __init__(self, access_token: Optional[str] = None, base_url: str = API_BASE):
         self.access_token = access_token
@@ -64,18 +169,18 @@ class ApiClient:
         try:
             resp = requests.post(url, headers=headers, json=json_body or {}, timeout=timeout)
         except requests.Timeout:
-            raise NottorneyAPIError("Request timed out. Please check your internet connection.")
+            raise AnkiPHAPIError("Request timed out. Please check your internet connection.")
         except requests.ConnectionError:
-            raise NottorneyAPIError("Connection failed. Please check your internet connection.")
+            raise AnkiPHAPIError("Connection failed. Please check your internet connection.")
         except Exception as e:
-            raise NottorneyAPIError(f"Network error: {e}") from e
+            raise AnkiPHAPIError(f"Network error: {e}") from e
 
         # Parse response
         try:
             data = resp.json()
         except Exception: 
             text = resp.text if hasattr(resp, "text") else ""
-            raise NottorneyAPIError(
+            raise AnkiPHAPIError(
                 f"Invalid response from server (HTTP {resp.status_code})", 
                 status_code=resp.status_code, 
                 details=text[:500]
@@ -90,7 +195,7 @@ class ApiClient:
             if not err_msg:
                 err_msg = f"HTTP {resp.status_code} error"
             
-            raise NottorneyAPIError(err_msg, status_code=resp.status_code, details=data)
+            raise AnkiPHAPIError(err_msg, status_code=resp.status_code, details=data)
 
         return data
 
@@ -107,7 +212,7 @@ class ApiClient:
                 try:
                     data = json.loads(raw.decode("utf-8"))
                 except Exception:
-                    raise NottorneyAPIError(
+                    raise AnkiPHAPIError(
                         "Invalid JSON response from server", 
                         status_code=resp.getcode(), 
                         details=raw[:500]
@@ -115,7 +220,7 @@ class ApiClient:
                 
                 if resp.getcode() >= 400:
                     err_msg = data.get("error") if isinstance(data, dict) else None
-                    raise NottorneyAPIError(
+                    raise AnkiPHAPIError(
                         err_msg or f"HTTP {resp.getcode()}", 
                         status_code=resp.getcode(), 
                         details=data
@@ -132,17 +237,17 @@ class ApiClient:
                 parsed = None
                 err_msg = None
             
-            raise NottorneyAPIError(
+            raise AnkiPHAPIError(
                 err_msg or f"HTTP {getattr(he, 'code', 'error')}", 
                 status_code=getattr(he, "code", None), 
                 details=parsed or str(he)
             ) from he
             
         except _urllib_error.URLError as ue:
-            raise NottorneyAPIError(f"Connection error: {ue}") from ue
+            raise AnkiPHAPIError(f"Connection error: {ue}") from ue
             
         except Exception as e:
-            raise NottorneyAPIError(f"Network error: {e}") from e
+            raise AnkiPHAPIError(f"Network error: {e}") from e
 
     # === AUTHENTICATION ENDPOINTS ===
     
@@ -210,7 +315,7 @@ class ApiClient:
     def download_deck_file(self, download_url: str) -> bytes:
         """Download deck file from signed URL"""
         if not download_url:
-            raise NottorneyAPIError("Download URL is required")
+            raise AnkiPHAPIError("Download URL is required")
 
         if not _HAS_REQUESTS: 
             # Use urllib to fetch bytes
@@ -219,10 +324,10 @@ class ApiClient:
                 with _urllib_request.urlopen(req, timeout=120) as resp:
                     content = resp.read()
                     if len(content) == 0:
-                        raise NottorneyAPIError("Downloaded file is empty")
+                        raise AnkiPHAPIError("Downloaded file is empty")
                     return content
             except Exception as e:
-                raise NottorneyAPIError(f"Network error while downloading deck: {e}") from e
+                raise AnkiPHAPIError(f"Network error while downloading deck: {e}") from e
 
         # Use requests library
         try:
@@ -237,12 +342,12 @@ class ApiClient:
                 try:
                     text = response.text[:1000]
                     if "error" in text.lower() or "expired" in text.lower():
-                        raise NottorneyAPIError(
+                        raise AnkiPHAPIError(
                             "Download URL may be expired or invalid. Please try again."
                         )
                 except Exception:
                     pass
-                raise NottorneyAPIError(
+                raise AnkiPHAPIError(
                     f"Received {content_type} instead of a deck file. URL may be expired."
                 )
 
@@ -260,7 +365,7 @@ class ApiClient:
                     content.extend(chunk)
 
             if len(content) == 0:
-                raise NottorneyAPIError("Downloaded file is empty")
+                raise AnkiPHAPIError("Downloaded file is empty")
 
             # Quick ZIP signature check (PK magic bytes)
             if len(content) >= 4:
@@ -270,16 +375,16 @@ class ApiClient:
             return bytes(content)
             
         except requests.HTTPError as he:
-            raise NottorneyAPIError(
+            raise AnkiPHAPIError(
                 f"HTTP error while downloading deck: {he}", 
                 status_code=getattr(he.response, "status_code", None)
             ) from he
             
         except requests.RequestException as re:
-            raise NottorneyAPIError(f"Network error while downloading deck: {re}") from re
+            raise AnkiPHAPIError(f"Network error while downloading deck: {re}") from re
             
         except Exception as e:
-            raise NottorneyAPIError(f"Unexpected error downloading deck: {e}") from e
+            raise AnkiPHAPIError(f"Unexpected error downloading deck: {e}") from e
 
     # === UPDATE CHECKING (NEW) ===
     

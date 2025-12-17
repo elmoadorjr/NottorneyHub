@@ -1,5 +1,5 @@
 """
-Card History Dialog for Nottorney Addon
+Card History Dialog for AnkiPH Addon
 Features: View card change history, Rollback to previous versions
 Version: 2.1.0
 """
@@ -12,7 +12,7 @@ from aqt.qt import (
 )
 from aqt import mw
 
-from ..api_client import api, set_access_token, NottorneyAPIError
+from ..api_client import api, set_access_token, AnkiPHAPIError
 from ..config import config
 
 
@@ -197,7 +197,7 @@ class CardHistoryDialog(QDialog):
             if self.history:
                 self.history_table.selectRow(0)
             
-        except NottorneyAPIError as e:
+        except AnkiPHAPIError as e:
             error_msg = str(e)
             if e.status_code == 401:
                 error_msg = "Session expired"
@@ -299,7 +299,7 @@ class CardHistoryDialog(QDialog):
                 self.status_label.setText(f"❌ {error_msg}")
                 QMessageBox.warning(self, "Rollback Failed", error_msg)
         
-        except NottorneyAPIError as e:
+        except AnkiPHAPIError as e:
             self.status_label.setText(f"❌ {str(e)}")
             QMessageBox.critical(self, "API Error", str(e))
         

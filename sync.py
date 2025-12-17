@@ -1,5 +1,5 @@
 """
-Progress syncing for the Nottorney addon - FIXED VERSION
+Progress syncing for the AnkiPH addon - FIXED VERSION
 Syncs study progress to the server with improved error handling
 FIXED: Now properly sets access token before syncing
 Version: 2.1.0
@@ -7,14 +7,14 @@ Version: 2.1.0
 
 from aqt import mw
 from datetime import datetime, timedelta
-from .api_client import api, NottorneyAPIError, set_access_token
+from .api_client import api, AnkiPHAPIError, set_access_token
 from .config import config
 from .deck_importer import get_deck_stats, deck_exists
 
 
 def get_progress_data() -> list:
     """
-    Get progress data for all downloaded Nottorney decks
+    Get progress data for all downloaded AnkiPH decks
     
     Returns:
         List of progress data dictionaries
@@ -377,7 +377,7 @@ def sync_progress():
         
         return result
     
-    except NottorneyAPIError as e:
+    except AnkiPHAPIError as e:
         if e.status_code == 401:
             print(f"✗ Sync failed: Session expired")
             config.clear_tokens()  # Clear expired tokens

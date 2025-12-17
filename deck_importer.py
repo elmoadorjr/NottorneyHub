@@ -1,5 +1,5 @@
 """
-Deck importer for the Nottorney addon - FIXED VERSION
+Deck importer for the AnkiPH addon - FIXED VERSION
 Handles importing .apkg files into Anki
 FIXED: Properly handles DeckNameId objects and PyQt6 compatibility
 ENHANCED: Added parent parameter to prevent orphaned operations

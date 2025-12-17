@@ -1,5 +1,5 @@
 """
-Sync Dialog for Nottorney Addon
+Sync Dialog for AnkiPH Addon
 Features: Push/Pull changes, Conflict Resolution
 Version: 2.1.0
 """
@@ -14,7 +14,7 @@ from aqt.qt import (
 from aqt import mw
 from datetime import datetime
 
-from ..api_client import api, set_access_token, NottorneyAPIError
+from ..api_client import api, set_access_token, AnkiPHAPIError
 from ..config import config
 
 
@@ -357,7 +357,7 @@ class SyncDialog(QDialog):
             item.setForeground(Qt.GlobalColor.gray)
             self.push_changes_list.addItem(item)
             
-        except NottorneyAPIError as e:
+        except AnkiPHAPIError as e:
             error_msg = str(e)
             if e.status_code == 401:
                 error_msg = "Session expired"

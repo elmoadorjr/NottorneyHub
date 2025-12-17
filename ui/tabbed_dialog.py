@@ -1,8 +1,9 @@
 """
-Modern Tabbed Dialog for Nottorney Addon
+Modern Tabbed Dialog for AnkiPH Addon
 Features: My Decks, Browse, Updates, Notifications tabs
 FIXED: Import errors resolved, proper relative imports
-Version: 2.1.0
+ENHANCED: Added tiered access support (v3.0)
+Version: 3.0.0
 """
 
 from aqt.qt import (
@@ -11,20 +12,21 @@ from aqt.qt import (
     QTabWidget, QWidget, QProgressDialog
 )
 from aqt import mw
+from aqt.utils import showInfo
 
 # Use relative imports from parent package
-from ..api_client import api, set_access_token, NottorneyAPIError
+from ..api_client import api, set_access_token, AnkiPHAPIError, AccessTier, can_sync_updates, show_upgrade_prompt
 from ..config import config
 from ..deck_importer import import_deck_with_progress
 from ..update_checker import update_checker
 
 
-class NottorneyTabbedDialog(QDialog):
-    """Modern tabbed dialog for Nottorney operations"""
+class AnkiPHTabbedDialog(QDialog):
+    """Modern tabbed dialog for AnkiPH operations"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("⚖️ Nottorney Deck Manager")
+        self.setWindowTitle("⚖️ AnkiPH Deck Manager")
         self.setMinimumSize(800, 600)
         self.all_decks = []
         self.import_in_progress = False
@@ -60,7 +62,7 @@ class NottorneyTabbedDialog(QDialog):
         layout.setSpacing(10)
         
         # Title
-        title = QLabel("⚖️ Nottorney Deck Manager")
+        title = QLabel("⚖️ AnkiPH Deck Manager")
         title.setStyleSheet("font-size: 20px; font-weight: bold; padding: 10px;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
@@ -131,9 +133,26 @@ class NottorneyTabbedDialog(QDialog):
         user_layout = QHBoxLayout()
         user_layout.setContentsMargins(5, 5, 5, 5)
         
-        user_label = QLabel("✓ Logged in")
+        user_label = QLabel("Logged in")
         user_label.setStyleSheet("color: #4CAF50; font-weight: bold; font-size: 13px;")
         user_layout.addWidget(user_label)
+        
+        # Subscription status badge (v3.0)
+        status_text = config.get_access_status_text()
+        if config.has_full_access():
+            status_style = (
+                "color: #4CAF50; font-size: 11px; padding: 3px 10px; "
+                "background: #E8F5E9; border-radius: 10px; font-weight: bold;"
+            )
+        else:
+            status_style = (
+                "color: #FF9800; font-size: 11px; padding: 3px 10px; "
+                "background: #FFF3E0; border-radius: 10px; font-weight: bold;"
+            )
+        
+        subscription_badge = QLabel(status_text)
+        subscription_badge.setStyleSheet(status_style)
+        user_layout.addWidget(subscription_badge)
         
         user_layout.addStretch()
         
@@ -432,7 +451,7 @@ class NottorneyTabbedDialog(QDialog):
                     # Customize message based on admin status
                     admin_note = " (Admin mode enabled)" if user_data.get('is_admin') else ""
                     QMessageBox.information(self, "Success", 
-                                          f"Login successful!{admin_note}\nReopen Nottorney to browse decks.")
+                                          f"Login successful!{admin_note}\nReopen AnkiPH to browse decks.")
                     self.accept()
                 else:
                     raise Exception("No access token received")
@@ -440,7 +459,7 @@ class NottorneyTabbedDialog(QDialog):
                 error_msg = result.get('message', 'Login failed')
                 QMessageBox.warning(self, "Login Failed", error_msg)
         
-        except NottorneyAPIError as e:
+        except AnkiPHAPIError as e:
             error_msg = str(e)
             if e.status_code == 401:
                 error_msg = "Invalid email or password."
@@ -749,7 +768,7 @@ class NottorneyTabbedDialog(QDialog):
                 error_msg = result.get('message', 'Failed to load decks')
                 self.browse_status.setText(f"❌ {error_msg}")
         
-        except NottorneyAPIError as e:
+        except AnkiPHAPIError as e:
             error_msg = str(e)
             if e.status_code == 401:
                 error_msg = "Session expired. Please login again."
@@ -1075,7 +1094,7 @@ class NottorneyTabbedDialog(QDialog):
             tab_label = f"📬 Notifications ({unread_count})" if unread_count > 0 else "📬 Notifications"
             self.tabs.setTabText(3, tab_label)
             
-        except NottorneyAPIError as e:
+        except AnkiPHAPIError as e:
             error_msg = str(e)
             if e.status_code == 401:
                 error_msg = "Session expired"
@@ -1280,7 +1299,7 @@ class NottorneyTabbedDialog(QDialog):
                                     on_failure=on_failure,
                                     parent=self)
         
-        except NottorneyAPIError as e:
+        except AnkiPHAPIError as e:
             # Clear import in progress flag
             self.import_in_progress = False
             

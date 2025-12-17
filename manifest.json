@@ -1,8 +1,8 @@
 {
-  "package": "Nottorney_Addon",
-  "name": "Nottorney",
-  "version": "2.1.0",
-  "author": "Nottorney Team",
+  "package": "AnkiPH_Addon",
+  "name": "AnkiPH",
+  "version": "3.0.0",
+  "author": "AnkiPH Team",
   "homepage": "https://nottorney.lovable.app",
   "conflicts": [],
   "mod": 0,

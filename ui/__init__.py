@@ -1,1 +1,1 @@
-"""UI Package for Nottorney Addon"""
+"""UI Package for AnkiPH Addon"""
