@@ -11,9 +11,19 @@ from aqt.qt import (
     QFormLayout, QComboBox, QTextEdit, QProgressBar
 )
 from aqt import mw
+import webbrowser
 
 from ..api_client import api, set_access_token, AnkiPHAPIError
 from ..config import config
+
+# Constants
+ADDON_VERSION = "3.1.0"
+HOMEPAGE_URL = "https://nottorney.lovable.app"
+DOCS_URL = f"{HOMEPAGE_URL}/docs"
+HELP_URL = f"{HOMEPAGE_URL}/help"
+TERMS_URL = f"{HOMEPAGE_URL}/terms"
+PRIVACY_URL = f"{HOMEPAGE_URL}/privacy"
+CHANGELOG_URL = f"{HOMEPAGE_URL}/changelog"
 
 
 def ensure_valid_token():
@@ -87,6 +97,10 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(self.general_tab, "🔧 General")
         self.tabs.addTab(self.protected_fields_tab, "🛡️ Protected Fields")
         self.tabs.addTab(self.advanced_tab, "⚡ Advanced")
+        
+        # Add About tab
+        self.about_tab = self.create_about_tab()
+        self.tabs.addTab(self.about_tab, "ℹ️ About")
         
         # Add Admin tab only if user is admin
         if config.is_admin():
@@ -281,6 +295,79 @@ class SettingsDialog(QDialog):
         self.advanced_status = QLabel("")
         self.advanced_status.setStyleSheet("color: #666; padding: 5px;")
         layout.addWidget(self.advanced_status)
+        
+        layout.addStretch()
+        tab.setLayout(layout)
+        return tab
+    
+    def create_about_tab(self):
+        """Create About tab with version, help, and legal links"""
+        tab = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        # Version header
+        version_label = QLabel(f"⚖️ AnkiPH v{ADDON_VERSION}")
+        version_label.setStyleSheet("font-size: 24px; font-weight: bold; padding: 10px;")
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(version_label)
+        
+        # Tagline
+        tagline = QLabel("Collaborative flashcard decks for Filipino law students")
+        tagline.setStyleSheet("font-size: 12px; color: #666; padding-bottom: 10px;")
+        tagline.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(tagline)
+        
+        # Help & Resources group
+        help_group = QGroupBox("Help & Resources")
+        help_layout = QVBoxLayout()
+        help_layout.setSpacing(8)
+        
+        docs_btn = QPushButton("📖 Documentation")
+        docs_btn.setStyleSheet("text-align: left; padding: 10px;")
+        docs_btn.clicked.connect(lambda: webbrowser.open(DOCS_URL))
+        help_layout.addWidget(docs_btn)
+        
+        help_btn = QPushButton("🆘 Get Help")
+        help_btn.setStyleSheet("text-align: left; padding: 10px;")
+        help_btn.clicked.connect(lambda: webbrowser.open(HELP_URL))
+        help_layout.addWidget(help_btn)
+        
+        changelog_btn = QPushButton("📝 Changelog")
+        changelog_btn.setStyleSheet("text-align: left; padding: 10px;")
+        changelog_btn.clicked.connect(lambda: webbrowser.open(CHANGELOG_URL))
+        help_layout.addWidget(changelog_btn)
+        
+        help_group.setLayout(help_layout)
+        layout.addWidget(help_group)
+        
+        # Legal group
+        legal_group = QGroupBox("Legal")
+        legal_layout = QVBoxLayout()
+        legal_layout.setSpacing(8)
+        
+        terms_btn = QPushButton("📜 Terms & Conditions")
+        terms_btn.setStyleSheet("text-align: left; padding: 10px;")
+        terms_btn.clicked.connect(lambda: webbrowser.open(TERMS_URL))
+        legal_layout.addWidget(terms_btn)
+        
+        privacy_btn = QPushButton("🔒 Privacy Policy")
+        privacy_btn.setStyleSheet("text-align: left; padding: 10px;")
+        privacy_btn.clicked.connect(lambda: webbrowser.open(PRIVACY_URL))
+        legal_layout.addWidget(privacy_btn)
+        
+        legal_group.setLayout(legal_layout)
+        layout.addWidget(legal_group)
+        
+        # Homepage link
+        homepage_btn = QPushButton("🌐 Visit AnkiPH Website")
+        homepage_btn.setStyleSheet(
+            "padding: 12px; font-weight: bold; "
+            "background-color: #3b82f6; color: white; border-radius: 5px;"
+        )
+        homepage_btn.clicked.connect(lambda: webbrowser.open(HOMEPAGE_URL))
+        layout.addWidget(homepage_btn)
         
         layout.addStretch()
         tab.setLayout(layout)

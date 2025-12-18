@@ -111,7 +111,7 @@ def setup_menu():
     """Setup menu in Anki - single action opens main dialog"""
     try:
         # Add single AnkiPH action to Tools menu (no submenu)
-        action = QAction("⚖️ AnkiPH", mw)
+        action = QAction(f"⚖️ AnkiPH v{ADDON_VERSION}", mw)
         action.triggered.connect(show_main_dialog)
         mw.form.menuTools.addAction(action)
         

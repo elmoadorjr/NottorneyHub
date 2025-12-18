@@ -316,6 +316,20 @@ class ApiClient:
         """Download deck file from signed URL"""
         if not download_url:
             raise AnkiPHAPIError("Download URL is required")
+        
+        # Validate URL format
+        if not isinstance(download_url, str):
+            raise AnkiPHAPIError(f"Download URL must be a string, got {type(download_url).__name__}")
+        
+        download_url = download_url.strip()
+        
+        if not download_url.startswith(('http://', 'https://')):
+            # Log what we received for debugging
+            preview = download_url[:100] if len(download_url) > 100 else download_url
+            print(f"✗ Invalid download_url received: {preview}")
+            raise AnkiPHAPIError(f"Invalid download URL format. Expected http/https URL, got: {preview[:50]}...")
+        
+        print(f"✓ Downloading from: {download_url[:80]}...")
 
         if not _HAS_REQUESTS: 
             # Use urllib to fetch bytes

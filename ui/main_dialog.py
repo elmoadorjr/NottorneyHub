@@ -1,189 +1,653 @@
 """
-Simplified Main Dialog for AnkiPH Addon
-Single unified dialog with minimal UI - AnkiHub-style simplicity
-ENHANCED: Added tiered access support (v3.0)
-Version: 3.1.0
+Deck Management Dialog for AnkiPH Addon
+AnkiHub-style two-panel layout with deck list and details
+Version: 3.2.0
 """
 
+import webbrowser
 from aqt.qt import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QListWidget, QListWidgetItem, QMessageBox, Qt,
-    QWidget, QProgressDialog
+    QWidget, QSplitter, QFrame, QCheckBox, QSizePolicy
 )
 from aqt import mw
-from aqt.utils import showInfo
+from aqt.utils import showInfo, tooltip
 
-from ..api_client import api, set_access_token, AnkiPHAPIError, AccessTier, can_sync_updates, show_upgrade_prompt
+from ..api_client import api, set_access_token, AnkiPHAPIError, show_upgrade_prompt
 from ..config import config
 from ..deck_importer import import_deck
 from ..update_checker import update_checker
 
+# URLs
+HOMEPAGE_URL = "https://nottorney.lovable.app"
+TERMS_URL = f"{HOMEPAGE_URL}/terms"
+PRIVACY_URL = f"{HOMEPAGE_URL}/privacy"
+PLANS_URL = f"{HOMEPAGE_URL}/pricing"
+COMMUNITY_URL = f"{HOMEPAGE_URL}/community"
 
-class AnkiPHMainDialog(QDialog):
-    """Simplified single dialog for AnkiPH operations"""
+
+class DeckManagementDialog(QDialog):
+    """AnkiHub-style two-panel deck management dialog"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("⚖️ AnkiPH")
-        self.setMinimumSize(500, 400)
-        self.import_in_progress = False
-        self.progress_dialog = None
+        self.setWindowTitle("AnkiPH | Deck Management")
+        self.setMinimumSize(700, 500)
+        self.resize(800, 550)
+        self.selected_deck = None
+        self.all_decks = []  # Store deck data for filtering
         self.setup_ui()
-    
-    def closeEvent(self, event):
-        """Prevent closing during import"""
-        if self.import_in_progress:
-            reply = QMessageBox.question(
-                self, "Import in Progress",
-                "A deck is being imported. Close anyway?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.No:
-                event.ignore()
-                return
-        
-        if self.progress_dialog:
-            self.progress_dialog.close()
-        event.accept()
+        self.apply_styles()
     
     def setup_ui(self):
-        """Setup main UI"""
+        """Setup the two-panel UI"""
         layout = QVBoxLayout()
-        layout.setSpacing(10)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         
-        # Title
-        title = QLabel("AnkiPH")
-        title.setStyleSheet("font-size: 20px; font-weight: bold; padding: 10px;")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
+        # Top action bar
+        layout.addWidget(self._create_action_bar())
         
+        # Check login state
         if not config.is_logged_in():
-            self.setup_login_ui(layout)
+            layout.addWidget(self._create_login_prompt())
         else:
-            self.setup_main_ui(layout)
+            # Main content - two panel splitter
+            layout.addWidget(self._create_main_content())
+            
+            # Bottom status bar
+            layout.addWidget(self._create_status_bar())
         
         self.setLayout(layout)
     
-    def setup_login_ui(self, layout):
-        """Setup login view - shows button to open login dialog"""
-        msg = QLabel("Please login to access your purchased decks")
-        msg.setStyleSheet("color: #555; font-size: 14px; padding: 15px;")
+    def _create_action_bar(self):
+        """Create top action bar with Browse and Create buttons"""
+        bar = QWidget()
+        bar.setObjectName("actionBar")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(15, 12, 15, 12)
+        
+        # Browse Decks button (primary)
+        browse_btn = QPushButton("🔗 Browse Decks")
+        browse_btn.setObjectName("primaryBtn")
+        browse_btn.clicked.connect(self.browse_decks)
+        layout.addWidget(browse_btn)
+        
+        layout.addStretch()
+        
+        # Create Deck button (secondary/outline)
+        create_btn = QPushButton("+ Create AnkiPH Deck")
+        create_btn.setObjectName("secondaryBtn")
+        create_btn.clicked.connect(self.create_deck)
+        layout.addWidget(create_btn)
+        
+        return bar
+    
+    def _create_login_prompt(self):
+        """Create login prompt for unauthenticated users"""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        msg = QLabel("Please sign in to manage your decks")
+        msg.setStyleSheet("color: #888; font-size: 14px; padding: 40px;")
         msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(msg)
         
-        layout.addStretch()
-        
-        # Login button - opens the AnkiHub-style login dialog
         login_btn = QPushButton("Sign In")
-        login_btn.setStyleSheet("""
-            padding: 12px 40px; 
-            font-weight: bold; 
-            font-size: 14px;
-            background-color: #4a90d9;
-            color: white;
-            border: none;
-            border-radius: 4px;
-        """)
-        login_btn.clicked.connect(self.show_login_dialog)
+        login_btn.setObjectName("primaryBtn")
+        login_btn.setFixedWidth(200)
+        login_btn.clicked.connect(self.show_login)
         layout.addWidget(login_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         
-        layout.addStretch()
-        
-        # Close button
-        close_btn = QPushButton("Close")
-        close_btn.setStyleSheet("padding: 8px 20px;")
-        close_btn.clicked.connect(self.reject)
-        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-        
-        layout.addStretch()
+        return container
     
-    def setup_main_ui(self, layout):
-        """Setup main logged-in UI"""
-        # User bar
-        user_bar = QHBoxLayout()
+    def _create_main_content(self):
+        """Create two-panel splitter layout"""
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setObjectName("mainSplitter")
         
-        user_label = QLabel("Logged in")
-        user_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
-        user_bar.addWidget(user_label)
+        # Left panel - deck list
+        left_panel = self._create_deck_list_panel()
+        splitter.addWidget(left_panel)
         
-        # Subscription status (v3.0)
-        status_text = config.get_access_status_text()
-        if config.has_full_access():
-            status_style = "color: #4CAF50; font-size: 11px; padding: 2px 8px; background: #E8F5E9; border-radius: 3px;"
-        else:
-            status_style = "color: #FF9800; font-size: 11px; padding: 2px 8px; background: #FFF3E0; border-radius: 3px;"
+        # Right panel - deck details
+        self.details_panel = self._create_details_panel()
+        splitter.addWidget(self.details_panel)
         
-        self.subscription_label = QLabel(status_text)
-        self.subscription_label.setStyleSheet(status_style)
-        user_bar.addWidget(self.subscription_label)
+        # Set initial sizes (40% left, 60% right)
+        splitter.setSizes([280, 420])
         
-        user_bar.addStretch()
+        return splitter
+    
+    def _create_deck_list_panel(self):
+        """Create left panel with subscribed decks list"""
+        panel = QFrame()
+        panel.setObjectName("leftPanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         
-        # Settings button - use text instead of emoji
-        settings_btn = QPushButton("Settings")
-        settings_btn.setStyleSheet("padding: 5px 15px;")
-        settings_btn.clicked.connect(self.open_settings)
-        user_bar.addWidget(settings_btn)
-        
-        logout_btn = QPushButton("Logout")
-        logout_btn.setStyleSheet("padding: 5px 15px;")
-        logout_btn.clicked.connect(self.logout)
-        user_bar.addWidget(logout_btn)
-        
-        layout.addLayout(user_bar)
-        
-        # Deck list header
-        header = QLabel("Your Decks")
-        header.setStyleSheet("font-weight: bold; font-size: 14px; padding: 5px;")
+        # Header
+        header = QLabel("Subscribed AnkiPH Decks")
+        header.setObjectName("panelHeader")
         layout.addWidget(header)
         
         # Deck list
         self.deck_list = QListWidget()
-        self.deck_list.setStyleSheet("QListWidget::item { padding: 10px; }")
+        self.deck_list.setObjectName("deckList")
+        self.deck_list.itemClicked.connect(self.on_deck_selected)
         layout.addWidget(self.deck_list)
-        
-        # Status
-        self.status_label = QLabel("")
-        self.status_label.setStyleSheet("color: #888; font-size: 11px; padding: 3px 5px;")
-        layout.addWidget(self.status_label)
-        
-        # Bottom buttons
-        btn_layout = QHBoxLayout()
-        
-        sync_btn = QPushButton("Sync All")
-        sync_btn.setStyleSheet("padding: 10px 20px; font-weight: bold; background-color: #4CAF50; color: white;")
-        sync_btn.clicked.connect(self.sync_all)
-        btn_layout.addWidget(sync_btn)
-        
-        download_btn = QPushButton("Download New")
-        download_btn.setStyleSheet("padding: 10px 15px;")
-        download_btn.clicked.connect(self.download_new_deck)
-        btn_layout.addWidget(download_btn)
-        
-        btn_layout.addStretch()
-        
-        close_btn = QPushButton("Close")
-        close_btn.setStyleSheet("padding: 10px 15px;")
-        close_btn.clicked.connect(self.accept)
-        btn_layout.addWidget(close_btn)
-        
-        layout.addLayout(btn_layout)
         
         # Load decks
         self.load_decks()
-    
-    # === LOGIN/LOGOUT ===
-    
-    def show_login_dialog(self):
-        """Show the AnkiHub-style login dialog"""
-        from .login_dialog import LoginDialog
         
+        return panel
+    
+    def _create_details_panel(self):
+        """Create right panel with deck details"""
+        panel = QFrame()
+        panel.setObjectName("rightPanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(20, 15, 20, 15)
+        layout.setSpacing(12)
+        
+        # Deck title
+        self.detail_title = QLabel("Select a deck")
+        self.detail_title.setObjectName("detailTitle")
+        layout.addWidget(self.detail_title)
+        
+        # Action buttons row
+        btn_row = QHBoxLayout()
+        
+        self.open_web_btn = QPushButton("Open on Web")
+        self.open_web_btn.setObjectName("outlineBtn")
+        self.open_web_btn.clicked.connect(self.open_on_web)
+        self.open_web_btn.setEnabled(False)
+        btn_row.addWidget(self.open_web_btn)
+        
+        self.unsubscribe_btn = QPushButton("Unsubscribe")
+        self.unsubscribe_btn.setObjectName("dangerOutlineBtn")
+        self.unsubscribe_btn.clicked.connect(self.unsubscribe_deck)
+        self.unsubscribe_btn.setEnabled(False)
+        btn_row.addWidget(self.unsubscribe_btn)
+        
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+        
+        # Separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setObjectName("separator")
+        layout.addWidget(sep)
+        
+        # Deck Options section
+        options_header = QLabel("Deck Options")
+        options_header.setObjectName("sectionHeader")
+        layout.addWidget(options_header)
+        
+        # Install status
+        self.install_status = QLabel("")
+        self.install_status.setObjectName("installStatus")
+        layout.addWidget(self.install_status)
+        
+        # Sync/Install button
+        self.sync_btn = QPushButton("🔄 Sync to Install")
+        self.sync_btn.setObjectName("syncBtn")
+        self.sync_btn.clicked.connect(self.sync_install_deck)
+        self.sync_btn.setVisible(False)
+        layout.addWidget(self.sync_btn)
+        
+        # Deck info
+        self.info_container = QWidget()
+        info_layout = QVBoxLayout(self.info_container)
+        info_layout.setContentsMargins(0, 10, 0, 0)
+        info_layout.setSpacing(6)
+        
+        self.version_label = QLabel("")
+        self.cards_label = QLabel("")
+        self.updated_label = QLabel("")
+        
+        for lbl in [self.version_label, self.cards_label, self.updated_label]:
+            lbl.setObjectName("infoLabel")
+            info_layout.addWidget(lbl)
+        
+        layout.addWidget(self.info_container)
+        self.info_container.setVisible(False)
+        
+        layout.addStretch()
+        
+        return panel
+    
+    def _create_status_bar(self):
+        """Create bottom status bar"""
+        bar = QWidget()
+        bar.setObjectName("statusBar")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(15, 10, 15, 10)
+        
+        # User info
+        user = config.get_user()
+        email = user.get('email', 'Unknown') if user else 'Unknown'
+        user_label = QLabel(f"Logged in as: {email}")
+        user_label.setObjectName("statusText")
+        layout.addWidget(user_label)
+        
+        # Subscription status
+        status = config.get_access_status_text()
+        status_label = QLabel(status)
+        status_label.setObjectName("subscriptionBadge" if config.has_full_access() else "freeBadge")
+        layout.addWidget(status_label)
+        
+        layout.addStretch()
+        
+        # Settings button
+        settings_btn = QPushButton("Settings")
+        settings_btn.setObjectName("linkBtn")
+        settings_btn.clicked.connect(self.open_settings)
+        layout.addWidget(settings_btn)
+        
+        # Logout button
+        logout_btn = QPushButton("Logout")
+        logout_btn.setObjectName("linkBtn")
+        logout_btn.clicked.connect(self.logout)
+        layout.addWidget(logout_btn)
+        
+        return bar
+    
+    def apply_styles(self):
+        """Apply dark theme styles matching AnkiHub"""
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #1e1e1e;
+                color: #e0e0e0;
+            }
+            
+            #actionBar {
+                background-color: #252525;
+                border-bottom: 1px solid #333;
+            }
+            
+            #primaryBtn {
+                background-color: #4a90d9;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 10px 24px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+            #primaryBtn:hover {
+                background-color: #5a9fe9;
+            }
+            
+            #secondaryBtn {
+                background-color: transparent;
+                color: #aaa;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 10px 24px;
+                font-size: 13px;
+            }
+            #secondaryBtn:hover {
+                border-color: #888;
+                color: #fff;
+            }
+            
+            #leftPanel {
+                background-color: #1e1e1e;
+                border-right: 1px solid #333;
+            }
+            
+            #panelHeader {
+                background-color: #252525;
+                color: #fff;
+                font-weight: bold;
+                font-size: 12px;
+                padding: 12px 15px;
+                border-bottom: 1px solid #333;
+            }
+            
+            #deckList {
+                background-color: #1e1e1e;
+                border: none;
+                color: #e0e0e0;
+                font-size: 13px;
+            }
+            #deckList::item {
+                padding: 10px 15px;
+                border-bottom: 1px solid #2a2a2a;
+            }
+            #deckList::item:selected {
+                background-color: #3a5070;
+                color: white;
+            }
+            #deckList::item:hover:!selected {
+                background-color: #2a2a2a;
+            }
+            
+            #rightPanel {
+                background-color: #1e1e1e;
+            }
+            
+            #detailTitle {
+                color: #4a90d9;
+                font-size: 18px;
+                font-weight: bold;
+            }
+            
+            #outlineBtn {
+                background-color: transparent;
+                color: #aaa;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: 12px;
+            }
+            #outlineBtn:hover {
+                border-color: #888;
+                color: #fff;
+            }
+            #outlineBtn:disabled {
+                color: #555;
+                border-color: #333;
+            }
+            
+            #dangerOutlineBtn {
+                background-color: transparent;
+                color: #e57373;
+                border: 1px solid #e57373;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: 12px;
+            }
+            #dangerOutlineBtn:hover {
+                background-color: #e57373;
+                color: white;
+            }
+            #dangerOutlineBtn:disabled {
+                color: #555;
+                border-color: #333;
+            }
+            
+            #separator {
+                color: #333;
+            }
+            
+            #sectionHeader {
+                color: #fff;
+                font-weight: bold;
+                font-size: 13px;
+                margin-top: 5px;
+            }
+            
+            #installStatus {
+                color: #ffa726;
+                font-size: 12px;
+            }
+            
+            #syncBtn {
+                background-color: #4a90d9;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 10px 20px;
+                font-size: 13px;
+            }
+            #syncBtn:hover {
+                background-color: #5a9fe9;
+            }
+            
+            #infoLabel {
+                color: #888;
+                font-size: 12px;
+            }
+            
+            #statusBar {
+                background-color: #252525;
+                border-top: 1px solid #333;
+            }
+            
+            #statusText {
+                color: #888;
+                font-size: 11px;
+            }
+            
+            #subscriptionBadge {
+                background-color: #4CAF50;
+                color: white;
+                padding: 3px 10px;
+                border-radius: 10px;
+                font-size: 10px;
+            }
+            
+            #freeBadge {
+                background-color: #FF9800;
+                color: white;
+                padding: 3px 10px;
+                border-radius: 10px;
+                font-size: 10px;
+            }
+            
+            #linkBtn {
+                background: transparent;
+                border: none;
+                color: #4a90d9;
+                font-size: 12px;
+                padding: 5px 10px;
+            }
+            #linkBtn:hover {
+                color: #6ab0f9;
+                text-decoration: underline;
+            }
+        """)
+    
+    # === DATA LOADING ===
+    
+    def load_decks(self):
+        """Load subscribed decks from local config"""
+        self.deck_list.clear()
+        
+        try:
+            downloaded_decks = config.get_downloaded_decks()
+            
+            if not downloaded_decks:
+                item = QListWidgetItem("No decks yet - click Browse Decks")
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                self.deck_list.addItem(item)
+                return
+            
+            for deck_id, deck_info in downloaded_decks.items():
+                # Get deck name from Anki
+                anki_deck_id = deck_info.get('anki_deck_id')
+                deck_name = f"Deck {deck_id[:8]}"
+                
+                if anki_deck_id and mw.col:
+                    try:
+                        deck = mw.col.decks.get(int(anki_deck_id))
+                        if deck:
+                            deck_name = deck['name']
+                    except:
+                        pass
+                
+                item = QListWidgetItem(deck_name)
+                item.setData(Qt.ItemDataRole.UserRole, {
+                    'deck_id': deck_id,
+                    'info': deck_info,
+                    'name': deck_name
+                })
+                self.deck_list.addItem(item)
+        
+        except Exception as e:
+            print(f"Error loading decks: {e}")
+    
+    def on_deck_selected(self, item):
+        """Handle deck selection - show details in right panel"""
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+        
+        self.selected_deck = data
+        deck_info = data.get('info', {})
+        
+        # Update title
+        self.detail_title.setText(data.get('name', 'Unknown Deck'))
+        
+        # Enable buttons
+        self.open_web_btn.setEnabled(True)
+        self.unsubscribe_btn.setEnabled(True)
+        
+        # Check install status
+        anki_deck_id = deck_info.get('anki_deck_id')
+        is_installed = False
+        
+        if anki_deck_id and mw.col:
+            try:
+                deck = mw.col.decks.get(int(anki_deck_id))
+                is_installed = deck is not None
+            except:
+                pass
+        
+        # Update install status
+        has_update = config.has_update_available(data.get('deck_id', ''))
+        
+        if not is_installed:
+            self.install_status.setText("⚠ This deck is not installed yet!")
+            self.install_status.setStyleSheet("color: #ffa726;")
+            self.sync_btn.setText("🔄 Sync to Install")
+            self.sync_btn.setVisible(True)
+        elif has_update:
+            self.install_status.setText("⬆ Update available!")
+            self.install_status.setStyleSheet("color: #4a90d9;")
+            self.sync_btn.setText("🔄 Sync Update")
+            self.sync_btn.setVisible(True)
+        else:
+            self.install_status.setText("✓ Installed and up to date")
+            self.install_status.setStyleSheet("color: #4CAF50;")
+            self.sync_btn.setVisible(False)
+        
+        # Show info
+        version = deck_info.get('version', '1.0')
+        self.version_label.setText(f"Version: {version}")
+        self.cards_label.setText(f"Cards: {deck_info.get('card_count', 'Unknown')}")
+        self.updated_label.setText(f"Downloaded: {deck_info.get('downloaded_at', 'Unknown')[:10] if deck_info.get('downloaded_at') else 'Unknown'}")
+        self.info_container.setVisible(True)
+    
+    # === ACTIONS ===
+    
+    def browse_decks(self):
+        """Open deck browser dialog"""
+        dialog = DeckBrowserDialog(self)
+        if dialog.exec():
+            self.load_decks()
+    
+    def create_deck(self):
+        """Create a new collaborative deck"""
+        # Check if user can create decks
+        if not config.can_create_decks():
+            show_membership_required_dialog(self)
+            return
+        
+        # Show confirmation dialog
+        dialog = CreateDeckConfirmDialog(self)
+        if dialog.exec():
+            # Open deck creation form
+            from .tabbed_dialog import TabbedDialog
+            # For now, just show info - full creation UI would be added later
+            showInfo("Deck creation feature coming soon!\n\nYou can create decks at:\n" + HOMEPAGE_URL)
+    
+    def sync_install_deck(self):
+        """Sync/install the selected deck"""
+        if not self.selected_deck:
+            return
+        
+        deck_id = self.selected_deck.get('deck_id')
+        deck_name = self.selected_deck.get('name', 'Unknown')
+        
+        # Show sync confirmation dialog
+        dialog = SyncInstallDialog(self, [deck_name])
+        if dialog.exec():
+            self._do_install(deck_id, deck_name, dialog.use_recommended_settings)
+    
+    def _do_install(self, deck_id, deck_name, use_recommended=True):
+        """Perform the actual deck installation"""
+        try:
+            token = config.get_access_token()
+            if token:
+                set_access_token(token)
+            
+            result = api.download_deck(deck_id)
+            print(f"✓ download_deck response: {result}")
+            
+            if result.get('success') and result.get('download_url'):
+                download_url = result['download_url']
+                print(f"✓ Got download URL: {download_url[:80]}...")
+                
+                # Download the file
+                deck_content = api.download_deck_file(download_url)
+                
+                # Import
+                anki_deck_id = import_deck(deck_content, deck_name)
+                
+                if anki_deck_id:
+                    config.save_downloaded_deck(
+                        deck_id,
+                        self.selected_deck.get('info', {}).get('version', '1.0'),
+                        anki_deck_id
+                    )
+                    tooltip(f"✓ {deck_name} installed!")
+                    self.load_decks()
+                else:
+                    raise Exception("Import failed")
+            else:
+                raise Exception(result.get('message', 'No download URL'))
+        
+        except Exception as e:
+            print(f"✗ Install error: {e}")
+            QMessageBox.critical(self, "Error", f"Install failed: {e}")
+    
+    def open_on_web(self):
+        """Open deck on web"""
+        webbrowser.open(HOMEPAGE_URL)
+    
+    def unsubscribe_deck(self):
+        """Unsubscribe from deck"""
+        if not self.selected_deck:
+            return
+        
+        reply = QMessageBox.question(
+            self, "Confirm Unsubscribe",
+            f"Remove '{self.selected_deck.get('name')}' from your subscribed decks?\n\n"
+            "The cards will remain in Anki but you won't receive updates.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            deck_id = self.selected_deck.get('deck_id')
+            config.remove_downloaded_deck(deck_id)
+            self.selected_deck = None
+            self.detail_title.setText("Select a deck")
+            self.open_web_btn.setEnabled(False)
+            self.unsubscribe_btn.setEnabled(False)
+            self.install_status.setText("")
+            self.sync_btn.setVisible(False)
+            self.info_container.setVisible(False)
+            self.load_decks()
+            tooltip("Deck unsubscribed")
+    
+    def show_login(self):
+        """Show login dialog"""
+        from .login_dialog import LoginDialog
         dialog = LoginDialog(self)
         if dialog.exec():
-            # Login was successful, close and reopen main dialog to show logged-in UI
-            QMessageBox.information(self, "Success", "Login successful!\nReopen to see your decks.")
+            QMessageBox.information(self, "Success", "Login successful! Please reopen.")
             self.accept()
+    
+    def open_settings(self):
+        """Open settings dialog"""
+        from .settings_dialog import SettingsDialog
+        dialog = SettingsDialog(self)
+        dialog.exec()
     
     def logout(self):
         """Logout user"""
@@ -197,201 +661,51 @@ class AnkiPHMainDialog(QDialog):
             set_access_token(None)
             QMessageBox.information(self, "Logged Out", "You have been logged out.")
             self.accept()
-    
-    # === DECK OPERATIONS ===
-    
-    def load_decks(self):
-        """Load user's decks with status"""
-        self.deck_list.clear()
-        self.status_label.setText("Loading...")
-        
-        try:
-            # Clean up deleted decks
-            from ..sync import clean_deleted_decks
-            clean_deleted_decks()
-            
-            downloaded_decks = config.get_downloaded_decks()
-            
-            if not downloaded_decks:
-                self.status_label.setText("No decks yet - click 'Download New'")
-                return
-            
-            for deck_id, deck_info in downloaded_decks.items():
-                version = deck_info.get('version', '1.0')
-                has_update = config.has_update_available(deck_id)
-                
-                # Get deck name from Anki
-                anki_deck_id = deck_info.get('anki_deck_id')
-                deck_name = f"Deck {deck_id[:8]}"
-                
-                if anki_deck_id and mw.col:
-                    try:
-                        deck = mw.col.decks.get(int(anki_deck_id))
-                        if deck:
-                            deck_name = deck['name']
-                    except:
-                        pass
-                
-                # Status indicator
-                if has_update:
-                    status = "[Update available]"
-                    color = Qt.GlobalColor.darkYellow
-                else:
-                    status = "Up to date"
-                    color = Qt.GlobalColor.darkGreen
-                
-                item = QListWidgetItem(f"{deck_name} (v{version})  -  {status}")
-                item.setData(Qt.ItemDataRole.UserRole, {'deck_id': deck_id, 'info': deck_info})
-                item.setForeground(color)
-                self.deck_list.addItem(item)
-            
-            self.status_label.setText(f"{len(downloaded_decks)} deck(s)")
-        
-        except Exception as e:
-            self.status_label.setText(f"Load failed: {e}")
-    
-    def sync_all(self):
-        """Sync all decks - check for updates and apply"""
-        self.status_label.setText("Checking for updates...")
-        
-        try:
-            # Check for updates
-            updates = update_checker.check_for_updates(silent=True)
-            
-            if not updates:
-                # Try to sync progress (non-critical - backend may not support yet)
-                try:
-                    from ..sync import sync_progress
-                    sync_progress()
-                except Exception as e:
-                    print(f"Progress sync skipped (non-critical): {e}")
-                
-                self.status_label.setText("All synced, no updates")
-                QMessageBox.information(self, "Sync Complete", "All decks are up to date!")
-                return
-            
-            # Check access before applying updates (v3.0)
-            if not config.has_full_access():
-                # Free tier - check if they can sync
-                showInfo(
-                    "Free tier decks don't receive updates.\n\n"
-                    "Subscribe to AnkiPH or get the Collection to receive the latest content!"
-                )
-                show_upgrade_prompt()
-                self.status_label.setText("Upgrade required for updates")
-                return
-            
-            # Apply updates
-            reply = QMessageBox.question(
-                self, "Updates Available",
-                f"{len(updates)} update(s) available. Apply now?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            
-            if reply == QMessageBox.StandardButton.Yes:
-                applied = 0
-                for deck_id, update_info in updates.items():
-                    try:
-                        self.status_label.setText(f"Updating {deck_id[:8]}...")
-                        self._apply_update(deck_id, update_info)
-                        applied += 1
-                    except Exception as e:
-                        print(f"Failed to update {deck_id}: {e}")
-                
-                # Try to sync progress after updates (non-critical)
-                try:
-                    from ..sync import sync_progress
-                    sync_progress()
-                except Exception as e:
-                    print(f"Progress sync skipped (non-critical): {e}")
-                
-                self.load_decks()
-                QMessageBox.information(self, "Done", f"Applied {applied} update(s)")
-            else:
-                self.status_label.setText(f"{len(updates)} updates pending")
-        
-        except Exception as e:
-            self.status_label.setText("Sync failed")
-            QMessageBox.critical(self, "Error", f"Sync failed: {e}")
-    
-    def _apply_update(self, deck_id, update_info):
-        """Apply a single deck update"""
-        token = config.get_access_token()
-        if token:
-            set_access_token(token)
-        
-        result = api.download_deck(deck_id)
-        
-        if result.get('success') and result.get('download_url'):
-            # Download the file content first
-            deck_content = api.download_deck_file(result['download_url'])
-            
-            # Import using the downloaded bytes
-            anki_deck_id = import_deck(deck_content, f"Deck-{deck_id[:8]}")
-            
-            if anki_deck_id:
-                config.save_downloaded_deck(
-                    deck_id,
-                    update_info.get('latest_version', '1.0'),
-                    anki_deck_id
-                )
-                config.clear_update_for_deck(deck_id)
-    
-    def download_new_deck(self):
-        """Show deck browser to download new deck"""
-        # DeckBrowserDialog is defined below in this same file
-        dialog = DeckBrowserDialog(self)
-        if dialog.exec():
-            self.load_decks()
-    
-    def open_settings(self):
-        """Open settings dialog"""
-        from .settings_dialog import SettingsDialog
-        dialog = SettingsDialog(self)
-        dialog.exec()
 
+
+# === HELPER DIALOGS ===
 
 class DeckBrowserDialog(QDialog):
-    """Simple deck browser for downloading new decks"""
+    """Browse available decks to subscribe"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Download New Deck")
-        self.setMinimumSize(400, 300)
+        self.setWindowTitle("Browse Decks")
+        self.setMinimumSize(450, 350)
         self.setup_ui()
     
     def setup_ui(self):
         layout = QVBoxLayout()
         
         # Search
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search decks...")
-        self.search_input.textChanged.connect(self.filter_decks)
-        layout.addWidget(self.search_input)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search decks...")
+        self.search.textChanged.connect(self.filter_decks)
+        layout.addWidget(self.search)
         
-        # Deck list
+        # List
         self.deck_list = QListWidget()
-        self.deck_list.itemDoubleClicked.connect(self.download_selected)
+        self.deck_list.itemDoubleClicked.connect(self.subscribe_selected)
         layout.addWidget(self.deck_list)
         
         # Status
-        self.status_label = QLabel("")
-        layout.addWidget(self.status_label)
+        self.status = QLabel("")
+        layout.addWidget(self.status)
         
         # Buttons
-        btn_layout = QHBoxLayout()
+        btn_row = QHBoxLayout()
         
-        download_btn = QPushButton("Download")
-        download_btn.clicked.connect(self.download_selected)
-        btn_layout.addWidget(download_btn)
+        sub_btn = QPushButton("Subscribe")
+        sub_btn.clicked.connect(self.subscribe_selected)
+        btn_row.addWidget(sub_btn)
         
-        btn_layout.addStretch()
+        btn_row.addStretch()
         
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(cancel_btn)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.reject)
+        btn_row.addWidget(close_btn)
         
-        layout.addLayout(btn_layout)
+        layout.addLayout(btn_row)
         self.setLayout(layout)
         
         self.load_decks()
@@ -399,13 +713,13 @@ class DeckBrowserDialog(QDialog):
     def load_decks(self):
         """Load available decks from server"""
         self.deck_list.clear()
-        self.status_label.setText("Loading...")
-        
-        token = config.get_access_token()
-        if token:
-            set_access_token(token)
+        self.status.setText("Loading...")
         
         try:
+            token = config.get_access_token()
+            if token:
+                set_access_token(token)
+            
             result = api.browse_decks()
             
             if result.get('success') or 'decks' in result:
@@ -415,50 +729,55 @@ class DeckBrowserDialog(QDialog):
                 for deck in decks:
                     deck_id = deck.get('id')
                     name = deck.get('title') or deck.get('name', 'Unknown')
-                    version = deck.get('version', '1.0')
                     
-                    is_downloaded = deck_id in downloaded
-                    prefix = "[Downloaded] " if is_downloaded else ""
+                    is_subscribed = deck_id in downloaded
+                    prefix = "✓ " if is_subscribed else ""
                     
-                    item = QListWidgetItem(f"{prefix}{name} (v{version})")
+                    item = QListWidgetItem(f"{prefix}{name}")
                     item.setData(Qt.ItemDataRole.UserRole, deck)
-                    
-                    if is_downloaded:
-                        item.setForeground(Qt.GlobalColor.darkGreen)
-                    
                     self.deck_list.addItem(item)
                 
-                self.status_label.setText(f"{len(decks)} deck(s) available")
+                self.status.setText(f"{len(decks)} deck(s) available")
             else:
-                self.status_label.setText("Failed to load")
+                self.status.setText("Failed to load")
         
         except Exception as e:
-            self.status_label.setText(f"Error: {e}")
+            self.status.setText(f"Error: {e}")
     
     def filter_decks(self):
-        """Filter deck list by search text"""
-        query = self.search_input.text().lower()
+        """Filter deck list"""
+        query = self.search.text().lower()
         for i in range(self.deck_list.count()):
             item = self.deck_list.item(i)
             item.setHidden(query not in item.text().lower())
     
-    def download_selected(self):
-        """Download selected deck"""
+    def subscribe_selected(self):
+        """Subscribe to selected deck"""
         current = self.deck_list.currentItem()
         if not current:
-            QMessageBox.warning(self, "No Selection", "Select a deck to download.")
+            QMessageBox.warning(self, "No Selection", "Select a deck first.")
             return
         
         deck = current.data(Qt.ItemDataRole.UserRole)
         deck_id = deck.get('id')
-        deck_name = deck.get('title') or deck.get('name', f'Deck-{deck_id[:8]}')
+        deck_name = deck.get('title') or deck.get('name')
         
-        # Check if already downloaded
+        # Check if already subscribed
         if deck_id in config.get_downloaded_decks():
-            QMessageBox.information(self, "Already Downloaded", "This deck is already downloaded.")
+            QMessageBox.information(self, "Already Subscribed", "You're already subscribed to this deck.")
             return
         
-        self.status_label.setText("Getting download URL...")
+        # Show sync install dialog
+        dialog = SyncInstallDialog(self, [deck_name])
+        if dialog.exec():
+            self._subscribe_and_install(deck, dialog.use_recommended_settings)
+    
+    def _subscribe_and_install(self, deck, use_recommended):
+        """Subscribe and install deck"""
+        deck_id = deck.get('id')
+        deck_name = deck.get('title') or deck.get('name')
+        
+        self.status.setText("Installing...")
         
         try:
             token = config.get_access_token()
@@ -466,16 +785,15 @@ class DeckBrowserDialog(QDialog):
                 set_access_token(token)
             
             result = api.download_deck(deck_id)
+            print(f"✓ download_deck response: {result}")
             
             if result.get('success') and result.get('download_url'):
-                self.status_label.setText("Downloading file...")
+                download_url = result['download_url']
                 
-                # Download the file content first
-                deck_content = api.download_deck_file(result['download_url'])
+                # Download file
+                deck_content = api.download_deck_file(download_url)
                 
-                self.status_label.setText("Importing...")
-                
-                # Import using the downloaded bytes
+                # Import
                 anki_deck_id = import_deck(deck_content, deck_name)
                 
                 if anki_deck_id:
@@ -484,13 +802,151 @@ class DeckBrowserDialog(QDialog):
                         deck.get('version', '1.0'),
                         anki_deck_id
                     )
-                    QMessageBox.information(self, "Success", "Deck downloaded!")
+                    QMessageBox.information(self, "Success", f"Subscribed to {deck_name}!")
                     self.accept()
                 else:
                     raise Exception("Import failed")
             else:
-                raise Exception(result.get('message', 'No download URL received'))
+                raise Exception(result.get('message', 'No download URL'))
         
         except Exception as e:
-            self.status_label.setText("Failed")
-            QMessageBox.critical(self, "Error", f"Download failed: {e}")
+            print(f"✗ Subscribe error: {e}")
+            self.status.setText("Failed")
+            QMessageBox.critical(self, "Error", f"Subscribe failed: {e}")
+
+
+class SyncInstallDialog(QDialog):
+    """Sync/Install confirmation with warnings"""
+    
+    def __init__(self, parent=None, deck_names=None):
+        super().__init__(parent)
+        self.setWindowTitle("AnkiPH | Sync")
+        self.setMinimumWidth(400)
+        self.deck_names = deck_names or []
+        self.use_recommended_settings = True
+        self.setup_ui()
+    
+    def setup_ui(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        
+        # Header
+        header = QLabel("You have new AnkiPH decks to install:")
+        header.setStyleSheet("font-weight: bold; font-size: 13px;")
+        layout.addWidget(header)
+        
+        # Deck list
+        for name in self.deck_names:
+            item = QLabel(f"• {name}")
+            item.setStyleSheet("color: #4a90d9; padding-left: 10px;")
+            layout.addWidget(item)
+        
+        # Warning
+        warning = QLabel(
+            "⚠ Please go to your other devices with Anki and sync before installing new deck(s).\n"
+            "Any unsynchronized reviews or changes on other devices may be lost during installation."
+        )
+        warning.setStyleSheet("color: #ffa726; font-size: 11px; padding: 10px; background-color: #2d2d2d; border-radius: 4px;")
+        warning.setWordWrap(True)
+        layout.addWidget(warning)
+        
+        # Checkbox
+        self.checkbox = QCheckBox("Use recommended deck settings")
+        self.checkbox.setChecked(True)
+        self.checkbox.setStyleSheet("color: #888;")
+        layout.addWidget(self.checkbox)
+        
+        # Buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        
+        install_btn = QPushButton("Install")
+        install_btn.setStyleSheet("background-color: #4a90d9; color: white; padding: 8px 20px; border: none; border-radius: 4px;")
+        install_btn.clicked.connect(self.on_install)
+        btn_row.addWidget(install_btn)
+        
+        skip_btn = QPushButton("Skip")
+        skip_btn.setStyleSheet("padding: 8px 20px;")
+        skip_btn.clicked.connect(self.reject)
+        btn_row.addWidget(skip_btn)
+        
+        layout.addLayout(btn_row)
+        self.setLayout(layout)
+    
+    def on_install(self):
+        self.use_recommended_settings = self.checkbox.isChecked()
+        self.accept()
+
+
+class CreateDeckConfirmDialog(QDialog):
+    """Confirm deck creation with terms"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Confirm AnkiPH Deck Creation")
+        self.setMinimumWidth(400)
+        self.setup_ui()
+    
+    def setup_ui(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        
+        # Question
+        question = QLabel("Are you sure you want to create a new AnkiPH deck?")
+        question.setStyleSheet("font-size: 13px;")
+        layout.addWidget(question)
+        
+        # Links
+        terms_link = QLabel(f'Terms of use: <a href="{TERMS_URL}" style="color: #4a90d9;">{TERMS_URL}</a>')
+        terms_link.setOpenExternalLinks(True)
+        layout.addWidget(terms_link)
+        
+        privacy_link = QLabel(f'Privacy Policy: <a href="{PRIVACY_URL}" style="color: #4a90d9;">{PRIVACY_URL}</a>')
+        privacy_link.setOpenExternalLinks(True)
+        layout.addWidget(privacy_link)
+        
+        # Checkbox
+        self.agree_checkbox = QCheckBox("by checking this checkbox you agree to the terms of use")
+        self.agree_checkbox.setStyleSheet("color: #888; font-size: 11px;")
+        layout.addWidget(self.agree_checkbox)
+        
+        # Buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        
+        yes_btn = QPushButton("Yes")
+        yes_btn.setStyleSheet("background-color: #4a90d9; color: white; padding: 8px 20px; border: none; border-radius: 4px;")
+        yes_btn.clicked.connect(self.on_yes)
+        btn_row.addWidget(yes_btn)
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setStyleSheet("padding: 8px 20px;")
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+        
+        layout.addLayout(btn_row)
+        self.setLayout(layout)
+    
+    def on_yes(self):
+        if not self.agree_checkbox.isChecked():
+            QMessageBox.warning(self, "Terms Required", "Please agree to the terms of use to continue.")
+            return
+        self.accept()
+
+
+def show_membership_required_dialog(parent=None):
+    """Show friendly paywall dialog"""
+    msg = QMessageBox(parent)
+    msg.setWindowTitle("Oh no!")
+    msg.setIcon(QMessageBox.Icon.Warning)
+    msg.setText("The action you are trying to perform requires an active membership.")
+    msg.setInformativeText(
+        f'Unlock a membership here: <a href="{PLANS_URL}">AnkiPH Plans</a>\n\n'
+        f'Or if you prefer, reach out for support at our <a href="{COMMUNITY_URL}">AnkiPH Community</a>.'
+    )
+    msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+    msg.exec()
+
+
+# For backwards compatibility - alias to new dialog
+AnkiPHMainDialog = DeckManagementDialog
