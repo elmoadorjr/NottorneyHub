@@ -687,14 +687,20 @@ class DeckManagementDialog(QDialog):
             self.sync_btn.setText("Sync")
     
     def _install_from_pull_changes(self, deck_id, deck_info):
-        """Install deck using v3.0 pull_changes flow"""
+        """Install deck using v3.0 pull_changes flow with pagination"""
         try:
-            # Full sync to get all cards
+            # Full sync to get all cards - with pagination for large decks
             self.sync_btn.setText("Loading cards...")
             QApplication.processEvents()
             
-            changes_result = api.pull_changes(deck_id, full_sync=True)
-            print(f"✓ pull_changes response: {changes_result}")
+            # Define progress callback
+            def update_progress(fetched, total):
+                self.sync_btn.setText(f"Downloading cards... ({fetched}/{total})")
+                QApplication.processEvents()
+            
+            # Use paginated pull to get ALL cards
+            changes_result = api.pull_all_cards(deck_id, progress_callback=update_progress)
+            print(f"✓ pull_all_cards response: success={changes_result.get('success')}, cards={len(changes_result.get('cards', []))}")
             
             if not changes_result.get('success'):
                 raise Exception(changes_result.get('error', 'Failed to fetch cards'))

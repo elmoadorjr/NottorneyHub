@@ -333,18 +333,27 @@ Check if deck has updates since last sync.
 
 ### POST `/addon-pull-changes`
 
-Pull card changes since last sync (incremental sync).
+Pull card changes since last sync (incremental sync) or all cards (full sync with pagination).
 
 **Request:**
 ```json
 {
   "deck_id": "uuid",
   "last_change_id": "uuid",
-  "full_sync": false
+  "full_sync": false,
+  "offset": 0,
+  "limit": 1000
 }
 ```
 
-**Response:**
+**Parameters:**
+- `deck_id`: Required. The deck UUID.
+- `last_change_id`: Optional. For incremental sync, the last change ID received.
+- `full_sync`: If `true`, returns all cards from `collaborative_deck_cards`.
+- `offset`: Pagination offset (default: 0). Used with `full_sync=true`.
+- `limit`: Cards per page (default: 1000, max: 1000). Used with `full_sync=true`.
+
+**Response (incremental sync - full_sync=false):**
 ```json
 {
   "success": true,
@@ -365,6 +374,30 @@ Pull card changes since last sync (incremental sync).
   "deck_version": "1.0.1"
 }
 ```
+
+**Response (full sync - full_sync=true):**
+```json
+{
+  "success": true,
+  "cards": [
+    {
+      "card_guid": "abc123",
+      "note_type": "Basic",
+      "fields": { "Front": "...", "Back": "..." },
+      "tags": ["tag1"],
+      "subdeck_path": "DeckName::SubDeck"
+    }
+  ],
+  "note_types": [...],
+  "total_cards": 32435,
+  "has_more": true,
+  "next_offset": 1000,
+  "latest_change_id": "uuid",
+  "deck_version": "1.0.1"
+}
+```
+
+> **Pagination Note:** For large decks (32,000+ cards), the addon fetches cards in batches of 1000. The backend MUST return `total_cards`, `has_more`, and `next_offset` to enable pagination.
 
 ### POST `/addon-push-changes` (User Suggestions)
 

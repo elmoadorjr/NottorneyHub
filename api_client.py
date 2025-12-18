@@ -654,7 +654,9 @@ class ApiClient:
 
     def pull_changes(self, deck_id: str, since: Optional[str] = None, 
                      last_change_id: Optional[str] = None,
-                     full_sync: bool = False) -> Any:
+                     full_sync: bool = False,
+                     offset: int = 0,
+                     limit: int = 1000) -> Any:
         """
         Pull publisher changes since last sync
         
@@ -663,22 +665,104 @@ class ApiClient:
             since: ISO 8601 timestamp to pull changes after
             last_change_id: ID of last synced change
             full_sync: If True, returns all cards from collaborative_deck_cards (source of truth)
+            offset: Pagination offset for full_sync (default: 0)
+            limit: Number of cards per page (default: 1000)
         
         Returns:
             {
                 "success": true,
                 "changes": [...],    # if full_sync=False
                 "cards": [...],      # if full_sync=True
-                "conflicts": [...]
+                "conflicts": [...],
+                "has_more": true/false,  # pagination indicator
+                "next_offset": 1000,     # next offset to use
+                "total_cards": 32435     # total card count
             }
         """
-        body = {"deck_id": deck_id, "full_sync": full_sync}
+        body = {
+            "deck_id": deck_id, 
+            "full_sync": full_sync,
+            "offset": offset,
+            "limit": limit
+        }
         if since:
             body["since"] = since
         if last_change_id:
             body["last_change_id"] = last_change_id
         
         return self.post("/addon-pull-changes", json_body=body)
+    
+    def pull_all_cards(self, deck_id: str, progress_callback=None) -> dict:
+        """
+        Pull ALL cards from a deck, handling pagination automatically.
+        
+        Args:
+            deck_id: The deck ID
+            progress_callback: Optional callback(fetched, total) for progress updates
+        
+        Returns:
+            {
+                "success": true,
+                "cards": [...],  # All cards combined
+                "note_types": [...],
+                "total_cards": 32435,
+                "latest_change_id": "uuid"
+            }
+        """
+        all_cards = []
+        note_types = []
+        latest_change_id = None
+        total_cards = 0
+        offset = 0
+        limit = 1000  # Batch size
+        
+        while True:
+            result = self.pull_changes(
+                deck_id=deck_id,
+                full_sync=True,
+                offset=offset,
+                limit=limit
+            )
+            
+            if not result.get('success'):
+                return result  # Return error
+            
+            cards = result.get('cards', [])
+            all_cards.extend(cards)
+            
+            # Get note types from first batch only
+            if offset == 0:
+                note_types = result.get('note_types', [])
+                total_cards = result.get('total_cards', len(cards))
+                latest_change_id = result.get('latest_change_id')
+            
+            # Progress callback
+            if progress_callback:
+                progress_callback(len(all_cards), total_cards)
+            
+            print(f"✓ Fetched batch: offset={offset}, got {len(cards)} cards (total: {len(all_cards)}/{total_cards})")
+            
+            # Check if more cards to fetch
+            has_more = result.get('has_more', False)
+            
+            # Fallback: if no has_more flag, check if we got a full batch
+            if not has_more and len(cards) == limit:
+                # Backend didn't send has_more, but we got a full batch - try next page
+                has_more = True
+            
+            if not has_more or len(cards) == 0:
+                break
+            
+            # Move to next page
+            offset = result.get('next_offset', offset + limit)
+        
+        return {
+            "success": True,
+            "cards": all_cards,
+            "note_types": note_types,
+            "total_cards": len(all_cards),
+            "latest_change_id": latest_change_id
+        }
 
     def submit_suggestion(self, deck_id: str, card_guid: str, field_name: str,
                          current_value: str, suggested_value: str, 
