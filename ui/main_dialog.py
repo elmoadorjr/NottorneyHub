@@ -741,10 +741,20 @@ class DeckManagementDialog(QDialog):
         
         col = mw.col
         
-        # Create main deck
+        # Determine the actual deck name from cards' subdeck_path (if available)
+        # This avoids creating a duplicate deck when subdeck_path differs from title
         deck_name = deck_info.get('title', 'Imported Deck')
-        did = col.decks.id(deck_name)
-        print(f"✓ Created/got deck: {deck_name} (ID: {did})")
+        
+        # Check first card for subdeck_path to get real deck name
+        if cards and cards[0].get('subdeck_path'):
+            first_path = cards[0]['subdeck_path']
+            # Use root deck from first subdeck_path
+            deck_name = first_path.split('::')[0]
+        
+        # Don't pre-create deck - let _add_card_to_deck create it when adding cards
+        # This prevents empty duplicate decks
+        did = None
+        print(f"✓ Will create deck: {deck_name}")
         
         # Create note types first
         for nt in note_types:
@@ -765,8 +775,11 @@ class DeckManagementDialog(QDialog):
         col.save()
         mw.reset()
         
-        print(f"✓ Deck built: {cards_added} added, {cards_updated} updated")
-        return did
+        # Get the actual deck ID (created when adding cards)
+        actual_did = col.decks.id(deck_name)
+        
+        print(f"✓ Deck built: {cards_added} added, {cards_updated} updated (deck ID: {actual_did})")
+        return actual_did
     
     def _create_or_update_note_type(self, col, note_type_data):
         """Create or update a note type from JSON data"""
@@ -856,13 +869,16 @@ class DeckManagementDialog(QDialog):
         # Set tags
         note.tags = card_data.get('tags', [])
         
-        # Handle subdeck path
+        # Handle subdeck path - always prefer subdeck_path if available
         subdeck_path = card_data.get('subdeck_path')
         if subdeck_path:
             # Use subdeck path as full deck name
             note_deck_id = col.decks.id(subdeck_path)
-        else:
+        elif deck_id:
             note_deck_id = deck_id
+        else:
+            # Fallback: create deck from deck_name
+            note_deck_id = col.decks.id(deck_name)
         
         # Add note
         col.add_note(note, note_deck_id)
