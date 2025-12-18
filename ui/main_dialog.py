@@ -39,13 +39,13 @@ class DeckManagementDialog(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        # Top action bar
-        layout.addWidget(self._create_action_bar())
-        
         # Check login state
         if not config.is_logged_in():
             layout.addWidget(self._create_login_prompt())
         else:
+            # Top action bar (only when logged in)
+            layout.addWidget(self._create_action_bar())
+            
             # Main content - two panel splitter
             layout.addWidget(self._create_main_content())
             
