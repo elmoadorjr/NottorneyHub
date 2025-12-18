@@ -5,7 +5,7 @@ SIMPLIFIED: Removed minimal UI mode, added auto-sync on startup
 """
 
 from aqt import mw, gui_hooks
-from aqt.qt import QAction
+from aqt.qt import QAction, QMenu
 from aqt.utils import showInfo, tooltip
 
 # Global reference to prevent garbage collection
@@ -106,12 +106,21 @@ def on_main_window_did_init():
 
 
 def setup_menu():
-    """Setup menu in Anki - single action opens main dialog"""
+    """Setup menu in Anki - top-level menu in menu bar next to Help"""
     try:
-        # Add single AnkiPH action to Tools menu (no submenu)
-        action = QAction(f"⚖️ AnkiPH v{ADDON_VERSION}", mw)
-        action.triggered.connect(show_main_dialog)
-        mw.form.menuTools.addAction(action)
+        # Create AnkiPH menu in the top menu bar
+        ankiph_menu = QMenu(f"⚖️ AnkiPH", mw)
+        
+        # Add main dialog action
+        open_action = QAction(f"Open AnkiPH v{ADDON_VERSION}", mw)
+        open_action.triggered.connect(show_main_dialog)
+        ankiph_menu.addAction(open_action)
+        
+        # Insert before Help menu (Help is typically the last menu)
+        # Get the menubar and insert before Help
+        menubar = mw.form.menubar
+        help_menu = mw.form.menuHelp
+        menubar.insertMenu(help_menu.menuAction(), ankiph_menu)
         
         print(f"✓ AnkiPH addon v{ADDON_VERSION} loaded successfully")
         print(f"  Auto-update check: {config.get_auto_check_updates()}")
