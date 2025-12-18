@@ -494,7 +494,7 @@ class ApiClient:
             deck_id: The deck ID
             since: ISO 8601 timestamp to pull changes after
             last_change_id: ID of last synced change
-            full_sync: If True, returns all cards from collection_cards (source of truth)
+            full_sync: If True, returns all cards from collaborative_deck_cards (source of truth)
         
         Returns:
             {
@@ -552,7 +552,7 @@ class ApiClient:
             }
         """
         body = {"deck_id": deck_id} if deck_id else {}
-        return self.post("/addon-get-protected-fields", json_body=body)
+        return self.post("/addon-protected-fields", json_body=body)
 
     def set_protected_fields(self, deck_id: str, field_names: List[str]) -> Any:
         """
@@ -565,8 +565,8 @@ class ApiClient:
         Returns:
             {"success": true}
         """
-        return self.post("/addon-get-protected-fields", 
-                        json_body={"deck_id": deck_id, "field_names": field_names})
+        return self.post("/addon-protected-fields", 
+                        json_body={"deck_id": deck_id, "fields": field_names})
 
     def get_card_history(self, deck_id: str, card_guid: str, limit: int = 50) -> Any:
         """
@@ -694,7 +694,7 @@ class ApiClient:
 
     def pull_changes_full(self, deck_id: str) -> Any:
         """
-        Pull full card data from collection_cards (source of truth).
+        Pull full card data from collaborative_deck_cards (source of truth).
         Use for initial sync or complete re-sync.
         
         Args:
