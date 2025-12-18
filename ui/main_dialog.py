@@ -66,37 +66,36 @@ class AnkiPHMainDialog(QDialog):
         self.setLayout(layout)
     
     def setup_login_ui(self, layout):
-        """Setup login form"""
+        """Setup login view - shows button to open login dialog"""
         msg = QLabel("Please login to access your purchased decks")
         msg.setStyleSheet("color: #555; font-size: 14px; padding: 15px;")
         msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(msg)
         
-        # Email
-        self.email_input = QLineEdit()
-        self.email_input.setPlaceholderText("Email")
-        layout.addWidget(self.email_input)
+        layout.addStretch()
         
-        # Password
-        self.password_input = QLineEdit()
-        self.password_input.setPlaceholderText("Password")
-        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.password_input.returnPressed.connect(self.login)
-        layout.addWidget(self.password_input)
+        # Login button - opens the AnkiHub-style login dialog
+        login_btn = QPushButton("Sign In")
+        login_btn.setStyleSheet("""
+            padding: 12px 40px; 
+            font-weight: bold; 
+            font-size: 14px;
+            background-color: #4a90d9;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        """)
+        login_btn.clicked.connect(self.show_login_dialog)
+        layout.addWidget(login_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         
-        # Buttons
-        btn_layout = QHBoxLayout()
+        layout.addStretch()
         
-        login_btn = QPushButton("Login")
-        login_btn.setStyleSheet("padding: 10px; font-weight: bold;")
-        login_btn.clicked.connect(self.login)
-        btn_layout.addWidget(login_btn)
-        
+        # Close button
         close_btn = QPushButton("Close")
+        close_btn.setStyleSheet("padding: 8px 20px;")
         close_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(close_btn)
+        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         
-        layout.addLayout(btn_layout)
         layout.addStretch()
     
     def setup_main_ui(self, layout):
@@ -176,46 +175,15 @@ class AnkiPHMainDialog(QDialog):
     
     # === LOGIN/LOGOUT ===
     
-    def login(self):
-        """Login user"""
-        email = self.email_input.text().strip()
-        password = self.password_input.text().strip()
+    def show_login_dialog(self):
+        """Show the AnkiHub-style login dialog"""
+        from .login_dialog import LoginDialog
         
-        if not email or not password:
-            QMessageBox.warning(self, "Missing Info", "Enter email and password.")
-            return
-        
-        try:
-            self.email_input.setEnabled(False)
-            self.password_input.setEnabled(False)
-            
-            result = api.login(email, password)
-            
-            if result.get('success'):
-                access_token = result.get('access_token')
-                refresh_token = result.get('refresh_token')
-                expires_at = result.get('expires_at')
-                user_data = result.get('user', {})
-                
-                if access_token:
-                    config.save_tokens(access_token, refresh_token, expires_at)
-                    config.save_user_data(user_data)
-                    set_access_token(access_token)
-                    
-                    QMessageBox.information(self, "Success", "Login successful!\nReopen to see your decks.")
-                    self.accept()
-                else:
-                    raise Exception("No access token received")
-            else:
-                QMessageBox.warning(self, "Login Failed", result.get('message', 'Login failed'))
-        
-        except AnkiPHAPIError as e:
-            QMessageBox.critical(self, "Error", str(e))
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Login failed: {e}")
-        finally:
-            self.email_input.setEnabled(True)
-            self.password_input.setEnabled(True)
+        dialog = LoginDialog(self)
+        if dialog.exec():
+            # Login was successful, close and reopen main dialog to show logged-in UI
+            QMessageBox.information(self, "Success", "Login successful!\nReopen to see your decks.")
+            self.accept()
     
     def logout(self):
         """Logout user"""
