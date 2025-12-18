@@ -15,6 +15,7 @@ import webbrowser
 
 from ..api_client import api, set_access_token, AnkiPHAPIError
 from ..config import config
+from ..utils import escape_anki_search
 from ..constants import (
     ADDON_VERSION, HOMEPAGE_URL, DOCS_URL, HELP_URL,
     TERMS_URL, PRIVACY_URL, CHANGELOG_URL
@@ -1042,9 +1043,10 @@ class SettingsDialog(QDialog):
         self.admin_log(f"🔄 Collecting cards from deck...")
         
         try:
-            # Get all notes from this deck
+            # Get all notes from this deck (escape special chars like parentheses in deck names)
             deck_name = mw.col.decks.get(anki_deck_id)['name']
-            note_ids = mw.col.find_notes(f'"deck:{deck_name}"')
+            escaped_deck_name = escape_anki_search(deck_name)
+            note_ids = mw.col.find_notes(f'"deck:{escaped_deck_name}"')
             
             changes = []
             for nid in note_ids:
@@ -1211,9 +1213,10 @@ class SettingsDialog(QDialog):
         self.admin_log(f"🔄 Collecting all cards from deck...")
         
         try:
-            # Get all notes from this deck
+            # Get all notes from this deck (escape special chars like parentheses in deck names)
             deck_name = mw.col.decks.get(anki_deck_id)['name']
-            note_ids = mw.col.find_notes(f'"deck:{deck_name}"')
+            escaped_deck_name = escape_anki_search(deck_name)
+            note_ids = mw.col.find_notes(f'"deck:{escaped_deck_name}"')
             
             cards = []
             for nid in note_ids:

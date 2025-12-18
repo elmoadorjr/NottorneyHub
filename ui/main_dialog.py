@@ -16,6 +16,7 @@ from aqt.utils import showInfo, tooltip
 from ..api_client import api, set_access_token, AnkiPHAPIError, show_upgrade_prompt
 from ..config import config
 from ..deck_importer import import_deck
+from ..utils import escape_anki_search
 from ..update_checker import update_checker
 from ..constants import HOMEPAGE_URL, TERMS_URL, PRIVACY_URL, PLANS_URL, COMMUNITY_URL
 
@@ -837,8 +838,9 @@ class DeckManagementDialog(QDialog):
                 print(f"⚠ No note type found for {note_type_name}")
                 return None
         
-        # Check if note already exists by guid
-        existing_nids = col.find_notes(f'guid:{guid}')
+        # Check if note already exists by guid (escape special chars for search)
+        escaped_guid = escape_anki_search(guid)
+        existing_nids = col.find_notes(f'guid:{escaped_guid}')
         
         if existing_nids:
             # Update existing note
