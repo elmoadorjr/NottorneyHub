@@ -15,7 +15,7 @@ from aqt.utils import showInfo
 
 from ..api_client import api, set_access_token, AnkiPHAPIError, AccessTier, can_sync_updates, show_upgrade_prompt
 from ..config import config
-from ..deck_importer import import_deck_with_progress
+from ..deck_importer import import_deck
 from ..update_checker import update_checker
 
 
@@ -323,11 +323,11 @@ class AnkiPHMainDialog(QDialog):
         result = api.download_deck(deck_id)
         
         if result.get('success') and result.get('download_url'):
-            anki_deck_id = import_deck_with_progress(
-                result['download_url'],
-                deck_id,
-                progress_callback=None
-            )
+            # Download the file content first
+            deck_content = api.download_deck_file(result['download_url'])
+            
+            # Import using the downloaded bytes
+            anki_deck_id = import_deck(deck_content, f"Deck-{deck_id[:8]}")
             
             if anki_deck_id:
                 config.save_downloaded_deck(
@@ -335,7 +335,7 @@ class AnkiPHMainDialog(QDialog):
                     update_info.get('latest_version', '1.0'),
                     anki_deck_id
                 )
-                config.clear_update(deck_id)
+                config.clear_update_for_deck(deck_id)
     
     def download_new_deck(self):
         """Show deck browser to download new deck"""
@@ -451,13 +451,14 @@ class DeckBrowserDialog(QDialog):
         
         deck = current.data(Qt.ItemDataRole.UserRole)
         deck_id = deck.get('id')
+        deck_name = deck.get('title') or deck.get('name', f'Deck-{deck_id[:8]}')
         
         # Check if already downloaded
         if deck_id in config.get_downloaded_decks():
             QMessageBox.information(self, "Already Downloaded", "This deck is already downloaded.")
             return
         
-        self.status_label.setText("Downloading...")
+        self.status_label.setText("Getting download URL...")
         
         try:
             token = config.get_access_token()
@@ -467,11 +468,15 @@ class DeckBrowserDialog(QDialog):
             result = api.download_deck(deck_id)
             
             if result.get('success') and result.get('download_url'):
-                anki_deck_id = import_deck_with_progress(
-                    result['download_url'],
-                    deck_id,
-                    progress_callback=None
-                )
+                self.status_label.setText("Downloading file...")
+                
+                # Download the file content first
+                deck_content = api.download_deck_file(result['download_url'])
+                
+                self.status_label.setText("Importing...")
+                
+                # Import using the downloaded bytes
+                anki_deck_id = import_deck(deck_content, deck_name)
                 
                 if anki_deck_id:
                     config.save_downloaded_deck(
@@ -484,7 +489,7 @@ class DeckBrowserDialog(QDialog):
                 else:
                     raise Exception("Import failed")
             else:
-                raise Exception(result.get('message', 'Download failed'))
+                raise Exception(result.get('message', 'No download URL received'))
         
         except Exception as e:
             self.status_label.setText("Failed")
