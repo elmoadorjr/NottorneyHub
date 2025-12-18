@@ -1,9 +1,9 @@
 """
 Robust API client for AnkiPH Add-on
 ENHANCED: Added update checking, notifications, and AnkiHub-parity endpoints
-ENHANCED: Added tiered access support (AccessTier enum and access control)
+ENHANCED: Added subscription-only access support (subscriber, free tier)
 ENHANCED: Added subscription management and v3.0 API alignment
-Version: 3.2.0
+Version: 3.3.0
 """
 
 from __future__ import annotations
@@ -30,14 +30,13 @@ except Exception:
     _HAS_REQUESTS = False
 
 
-# === TIERED ACCESS SYSTEM (v3.0) ===
+# === SUBSCRIPTION ACCESS SYSTEM (v3.2 - subscription-only) ===
 
 class AccessTier(Enum):
     """User access tier for AnkiPH"""
-    COLLECTION_OWNER = "collection_owner"  # Full access, owns decks forever
-    SUBSCRIBER = "subscriber"              # Full access via subscription
-    FREE_TIER = "free_tier"                # Limited to is_free decks only
-    LEGACY = "legacy_purchase"             # Individual deck purchases
+    LIFETIME_SUBSCRIBER = "lifetime_subscriber"  # Full access, never expires
+    SUBSCRIBER = "subscriber"                    # Full access via active subscription
+    FREE_TIER = "free_tier"                      # Limited to is_free decks only
 
 
 def check_access(user_data: dict, deck: dict) -> Optional[AccessTier]:
@@ -45,15 +44,15 @@ def check_access(user_data: dict, deck: dict) -> Optional[AccessTier]:
     Determine user's access tier for a specific deck.
     
     Args:
-        user_data: Dict with owns_collection, has_subscription, subscription_expires_at
+        user_data: Dict with has_subscription, subscription_expires_at, is_lifetime
         deck: Dict with access_type field from API response
     
     Returns:
         AccessTier enum value, or None if no access
     """
-    # Tier 1: Collection owners get everything
-    if user_data.get("owns_collection"):
-        return AccessTier.COLLECTION_OWNER
+    # Tier 1: Lifetime subscribers get everything
+    if user_data.get("is_lifetime"):
+        return AccessTier.LIFETIME_SUBSCRIBER
     
     # Tier 2: Active subscribers get everything
     if user_data.get("has_subscription"):
@@ -70,14 +69,10 @@ def check_access(user_data: dict, deck: dict) -> Optional[AccessTier]:
             # No expiry set, assume active
             return AccessTier.SUBSCRIBER
     
-    # Tier 3: Free tier - only is_free subdecks
+    # Tier 3: Free tier - only is_free decks
     access_type = deck.get("access_type", "")
     if access_type == "free_tier":
         return AccessTier.FREE_TIER
-    
-    # Tier 4: Legacy individual purchases
-    if access_type == "legacy_purchase":
-        return AccessTier.LEGACY
     
     return None  # No access
 
@@ -95,37 +90,35 @@ def can_sync_updates(tier: Optional[AccessTier]) -> bool:
     """
     if tier is None:
         return False
-    return tier in [AccessTier.COLLECTION_OWNER, AccessTier.SUBSCRIBER, AccessTier.LEGACY]
+    return tier in [AccessTier.LIFETIME_SUBSCRIBER, AccessTier.SUBSCRIBER]
 
 
 def show_upgrade_prompt():
     """
     Show upgrade dialog when user tries to access paid content.
-    Opens browser to collection purchase or subscription page.
+    Opens browser to subscription page.
     """
     try:
         from aqt.qt import QMessageBox
         from aqt import mw
         
         dialog = QMessageBox(mw)
-        dialog.setWindowTitle("Upgrade Required")
+        dialog.setWindowTitle("Subscription Required")
         dialog.setText(
-            "This deck requires a AnkiPH subscription or Collection purchase.\n\n"
-            "\u2022 Collection: \u20b11,000 one-time (own all decks forever)\n"
-            "\u2022 AnkiPH: \u20b1149/month (sync all decks)\n"
+            "This deck requires an AnkiPH subscription.\n\n"
+            "\u2022 Student: \u20b1100/month\n"
+            "\u2022 Regular: \u20b1149/month\n\n"
+            "Subscribe to sync all 33,709+ Philippine bar exam cards."
         )
         dialog.setIcon(QMessageBox.Icon.Information)
         
-        collection_btn = dialog.addButton("Get Collection", QMessageBox.ButtonRole.ActionRole)
-        subscribe_btn = dialog.addButton("Subscribe", QMessageBox.ButtonRole.ActionRole)
+        subscribe_btn = dialog.addButton("Subscribe Now", QMessageBox.ButtonRole.ActionRole)
         dialog.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
         
         dialog.exec()
         
         clicked = dialog.clickedButton()
-        if clicked == collection_btn:
-            webbrowser.open(COLLECTION_URL)
-        elif clicked == subscribe_btn:
+        if clicked == subscribe_btn:
             webbrowser.open(PREMIUM_URL)
     except Exception as e:
         print(f"\u2717 Failed to show upgrade prompt: {e}")

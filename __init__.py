@@ -1,7 +1,7 @@
 """
 AnkiPH Anki Addon - Simplified Version
-PyQt6 Compatible - v3.1.0
-SIMPLIFIED: Removed minimal UI mode, added auto-sync on startup
+PyQt6 Compatible - v3.3.0
+SIMPLIFIED: Subscription-only model, auto-sync on startup
 """
 
 from aqt import mw, gui_hooks

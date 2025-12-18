@@ -1,6 +1,6 @@
 # AnkiPH Anki Addon
 
-**Version:** 3.1.0  
+**Version:** 3.3.0  
 **Updated:** December 18, 2025  
 **Compatible with:** Anki 24.x - 25.x (PyQt6)
 
@@ -14,7 +14,7 @@ AnkiPH is an AnkiHub-style deck syncing addon for Philippine students. It provid
 - **Automatic updates** - Checks for deck updates on startup
 - **Progress tracking** - Syncs study progress to server
 - **Notifications** - Receive announcements from deck publishers
-- **Tiered access** - Collection Owner, Subscriber, Free Tier, and Legacy Purchase support
+- **Subscription-only access** - Student (₱100/mo), Regular (₱149/mo), Lifetime plans
 
 ---
 
@@ -22,10 +22,11 @@ AnkiPH is an AnkiHub-style deck syncing addon for Philippine students. It provid
 
 1. **Install** the addon in Anki
 2. **Restart** Anki
-3. **Open** → Tools → ⚖️ AnkiPH
+3. **Open** → ⚖️ AnkiPH (in top menu bar)
 4. **Login** with your account
-5. **Browse** and download decks
-6. **Study** - Updates sync automatically on startup
+5. **Subscribe** to access all 33,709+ cards
+6. **Browse** and download decks
+7. **Study** - Updates sync automatically on startup
 
 ---
 
@@ -39,7 +40,7 @@ AnkiPH is an AnkiHub-style deck syncing addon for Philippine students. It provid
 - ✅ Manual update application
 - ✅ Notifications system
 - ✅ Progress syncing
-- ✅ Tiered access (Collection Owner, Subscriber, Free Tier)
+- ✅ Subscription access tiers (Lifetime, Student, Regular, Free)
 
 ### Advanced Features (UI Ready, API Verification Needed)
 - ⚠️ Push/Pull card changes
@@ -110,7 +111,7 @@ Access config via: **Tools → Add-ons → AnkiPH → Config**
 ### "Update check failed"
 1. Check internet connection
 2. Verify you're logged in
-3. Try: Tools → ⚖️ AnkiPH → Check for Updates
+3. Try: ⚖️ AnkiPH → Check for Updates
 
 ### "Session expired"
 1. Open AnkiPH
@@ -120,16 +121,28 @@ Access config via: **Tools → Add-ons → AnkiPH → Config**
 
 ## Version History
 
-### v3.1.0 (December 18, 2025) - CURRENT
+### v3.3.0 (December 18, 2025) - CURRENT
+- 🔄 **Subscription-only model** - Removed legacy collection purchase references
+- ✨ **Lifetime Subscriber tier** - Grandfathered users get permanent access
+- ✨ **is_lifetime flag** - Server returns is_lifetime for lifetime subscribers
+- 🔧 Removed `owns_collection`, `COLLECTION_OWNER`, `LEGACY` access tiers
+- 🔧 Updated upgrade prompts to subscription-only messaging
+
+### v3.2.0 (December 18, 2025)
+- 🔧 Fixed deck download/sync with v3.0 pull-changes flow
+- 🔧 Fixed Anki search syntax with special characters
+- 🔧 Improved error handling and loading states
+
+### v3.1.0 (December 18, 2025)
 - ✨ **Collaborative Deck Management** - Create, update, delete your own decks
 - ✨ **Push Deck Cards** - Upload up to 500 cards per batch with change tracking
-- ✨ **Deck Creation Limits** - 10 decks for Collection Owners, 5 for Subscribers
+- ✨ **Deck Creation Limits** - 10 decks for Subscribers
 - 🔧 Fixed `push_deck_cards()` to use `delete_missing` parameter
 - 📝 Updated API documentation with complete endpoint specs
 
 ### v3.0.0 (December 17, 2025)
 - 🎨 Rebranded from Nottorney to AnkiPH
-- ✨ Added tiered access support (Collection Owner, Subscriber, Free Tier, Legacy)
+- ✨ Added tiered access support (Lifetime, Subscriber, Free Tier)
 - ✨ Subscription status display in UI
 - ✨ Upgrade prompts for free tier users
 
@@ -159,7 +172,7 @@ Access config via: **Tools → Add-ons → AnkiPH → Config**
 
 ## Support
 
-- **Homepage:** https://nottorney.lovable.app
+- **Homepage:** https://nottorney.com
 - **API Documentation:** See `ankiph_api_docs_Version3.md`
 
 ---

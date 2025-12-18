@@ -2,8 +2,8 @@
 Configuration management for the AnkiPH addon
 FIXED: Profile-specific deck tracking using collection metadata
 ENHANCED: Added update checking, notification tracking, and sync state management
-ENHANCED: Added tiered access support (collection owner, subscriber, free tier, legacy)
-Version: 3.1.0
+ENHANCED: Added subscription-only access support (subscriber, free tier)
+Version: 3.2.0
 """
 
 from aqt import mw
@@ -81,11 +81,11 @@ class Config:
             "expires_at": None,
             "user": None,
             "is_admin": False,
-            # Tiered access fields (v3.0)
-            "owns_collection": False,
+            # Subscription access fields (v3.2 - subscription-only model)
             "has_subscription": False,
             "subscription_expires_at": None,
             "subscription_tier": "free",
+            "is_lifetime": False,
             # Collaborative deck creation fields (v3.1)
             "can_create_decks": False,
             "created_decks_count": 0,
@@ -198,18 +198,18 @@ class Config:
         
         Args:
             user_data: Dict containing user info (id, email, full_name, is_admin,
-                       owns_collection, has_subscription, subscription_expires_at, subscription_tier,
+                       has_subscription, subscription_expires_at, subscription_tier, is_lifetime,
                        can_create_decks, created_decks_count, max_decks_allowed)
         """
         cfg = self._get_config()
         cfg['user'] = user_data
         cfg['is_admin'] = user_data.get('is_admin', False)
         
-        # Save tiered access fields (v3.0)
-        cfg['owns_collection'] = user_data.get('owns_collection', False)
+        # Save subscription access fields (v3.2 - subscription-only)
         cfg['has_subscription'] = user_data.get('has_subscription', False)
         cfg['subscription_expires_at'] = user_data.get('subscription_expires_at')
         cfg['subscription_tier'] = user_data.get('subscription_tier', 'free')
+        cfg['is_lifetime'] = user_data.get('is_lifetime', False)
         
         # Save collaborative deck creation fields (v3.1)
         cfg['can_create_decks'] = user_data.get('can_create_decks', False)
@@ -226,10 +226,11 @@ class Config:
     
     def _get_tier_display(self) -> str:
         """Get human-readable tier display for logging"""
-        if self.owns_collection():
-            return "Collection Owner"
+        if self.is_lifetime_subscriber():
+            return "Lifetime Subscriber"
         if self.has_active_subscription():
-            return "Subscriber"
+            tier = self.get_subscription_tier()
+            return f"{tier.capitalize()} Subscriber" if tier != 'free' else "Subscriber"
         return "Free Tier"
     
     def is_admin(self) -> bool:
@@ -248,11 +249,11 @@ class Config:
         cfg['expires_at'] = None
         cfg['user'] = None
         cfg['is_admin'] = False
-        # Clear tiered access fields (v3.0)
-        cfg['owns_collection'] = False
+        # Clear subscription access fields (v3.2)
         cfg['has_subscription'] = False
         cfg['subscription_expires_at'] = None
         cfg['subscription_tier'] = 'free'
+        cfg['is_lifetime'] = False
         # Clear collaborative deck creation fields (v3.1)
         cfg['can_create_decks'] = False
         cfg['created_decks_count'] = 0
@@ -265,33 +266,40 @@ class Config:
             print("✗ Failed to clear tokens")
         return success
     
-    # === TIERED ACCESS (v3.0) ===
-    
-    def owns_collection(self) -> bool:
-        """Check if user owns the AnkiPH collection (₱1,000 one-time purchase)"""
-        return self._get_config().get('owns_collection', False)
+    # === SUBSCRIPTION ACCESS (v3.2 - subscription-only model) ===
     
     def has_subscription(self) -> bool:
-        """Check if user has a AnkiPH subscription (may be expired)"""
+        """Check if user has an AnkiPH subscription (may be expired)"""
         return self._get_config().get('has_subscription', False)
     
     def get_subscription_tier(self) -> str:
-        """Get subscription tier: 'free', 'standard', or 'premium'"""
+        """Get subscription tier: 'free', 'student', 'regular', or 'lifetime'"""
         return self._get_config().get('subscription_tier', 'free')
     
     def get_subscription_expires_at(self) -> str:
         """Get subscription expiry timestamp (ISO format) or None"""
         return self._get_config().get('subscription_expires_at')
     
+    def is_lifetime_subscriber(self) -> bool:
+        """Check if user has lifetime subscription (grandfathered or purchased)"""
+        if self._get_config().get('is_lifetime', False):
+            return True
+        tier = self.get_subscription_tier()
+        return tier == 'lifetime'
+    
     def has_active_subscription(self) -> bool:
         """
         Check if user has an active (non-expired) AnkiPH subscription.
         
         Returns:
-            True if user has subscription AND it hasn't expired
+            True if user has subscription AND it hasn't expired (or is lifetime)
         """
         if not self.has_subscription():
             return False
+        
+        # Lifetime subscribers never expire
+        if self.is_lifetime_subscriber():
+            return True
         
         expires_at = self.get_subscription_expires_at()
         if not expires_at:
@@ -309,30 +317,32 @@ class Config:
         Check if user has full access to all decks.
         
         Returns:
-            True if user is collection owner OR has active subscription
+            True if user has an active subscription
         """
-        return self.owns_collection() or self.has_active_subscription()
+        return self.has_active_subscription()
     
     def get_access_status_text(self) -> str:
         """
         Get human-readable subscription status for UI display.
         
         Returns:
-            Status string like "Collection Owner - Full Access" or "Free Tier - Limited Access"
+            Status string like "Lifetime Subscriber" or "Free Tier - Limited Access"
         """
-        if self.owns_collection():
-            return "Collection Owner - Full Access"
+        if self.is_lifetime_subscriber():
+            return "Lifetime Subscriber - Full Access"
         
         if self.has_active_subscription():
+            tier = self.get_subscription_tier()
             expires = self.get_subscription_expires_at()
+            tier_label = tier.capitalize() if tier != 'free' else 'AnkiPH'
+            
             if expires:
-                # Format: "Subscriber - Expires: 2024-01-15"
                 try:
                     expiry_date = expires[:10]  # Get YYYY-MM-DD
-                    return f"AnkiPH Subscriber - Expires: {expiry_date}"
+                    return f"{tier_label} Subscriber - Expires: {expiry_date}"
                 except:
                     pass
-            return "AnkiPH Subscriber - Active"
+            return f"{tier_label} Subscriber - Active"
         
         return "Free Tier - Limited Access"
     

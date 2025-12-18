@@ -1,7 +1,7 @@
 """
 Deck Management Dialog for AnkiPH Addon
 AnkiHub-style two-panel layout with deck list and details
-Version: 3.2.0
+Version: 3.3.0
 """
 
 import webbrowser
