@@ -1,13 +1,13 @@
 """
 Login Dialog for AnkiPH Addon
 Modern Premium Login UI - Stable Version
-Version: 5.2.0 - Fixed button visibility and text alignment
+Version: 5.3.0 - Final polish with proper styling
 """
 
 import webbrowser
 from aqt.qt import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, Qt, QFrame, QWidget
+    QLineEdit, Qt, QFrame
 )
 from aqt import mw
 
@@ -19,25 +19,25 @@ from .components import ClickableLabel
 
 
 class LoginDialog(QDialog):
-    """Modern Premium Login Dialog for AnkiPH - Windows Compatible"""
+    """Modern Premium Login Dialog for AnkiPH"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Sign in to AnkiPH")
-        self.setFixedSize(400, 460)
+        self.setFixedSize(380, 420)
         self.setup_ui()
         self.apply_styles()
     
     def setup_ui(self):
         """Setup the modern login UI"""
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(40, 30, 40, 30)
+        main_layout.setContentsMargins(36, 28, 36, 28)
         main_layout.setSpacing(0)
         
         # Branding Header
         brand_container = QVBoxLayout()
         brand_container.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        brand_container.setSpacing(6)
+        brand_container.setSpacing(4)
         
         # App title
         title_label = QLabel("AnkiPH")
@@ -52,49 +52,50 @@ class LoginDialog(QDialog):
         brand_container.addWidget(subtitle_label)
         
         main_layout.addLayout(brand_container)
-        main_layout.addSpacing(32)
+        main_layout.addSpacing(28)
         
-        # Email/Username Input (Stacked)
+        # Email/Username Input
         email_container = QVBoxLayout()
-        email_container.setSpacing(8)
+        email_container.setSpacing(6)
         
         email_label = QLabel("Username or Email")
         email_label.setObjectName("inputLabel")
         email_container.addWidget(email_label)
         
         self.email_input = QLineEdit()
-        self.email_input.setObjectName("modernInput")
+        self.email_input.setObjectName("styledInput")
         self.email_input.setPlaceholderText("Enter your username or email")
-        self.email_input.setMinimumHeight(44)
+        self.email_input.setMinimumHeight(40)
         email_container.addWidget(self.email_input)
         
         main_layout.addLayout(email_container)
         main_layout.addSpacing(16)
         
-        # Password Input (Stacked)
+        # Password Input
         password_container = QVBoxLayout()
-        password_container.setSpacing(8)
+        password_container.setSpacing(6)
         
         password_label = QLabel("Password")
         password_label.setObjectName("inputLabel")
         password_container.addWidget(password_label)
         
-        # Password field row with separate input and button
+        # Password row with input and toggle
         password_row = QHBoxLayout()
         password_row.setSpacing(8)
         
         self.password_input = QLineEdit()
-        self.password_input.setObjectName("modernInput")
+        self.password_input.setObjectName("styledInput")
         self.password_input.setPlaceholderText("Enter your password")
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.password_input.setMinimumHeight(44)
+        self.password_input.setMinimumHeight(40)
         self.password_input.returnPressed.connect(self.login)
         password_row.addWidget(self.password_input, 1)
         
-        # Show/Hide button - separate from input
+        # Show/Hide toggle button
         self.toggle_btn = QPushButton("Show")
-        self.toggle_btn.setObjectName("toggleBtn")
-        self.toggle_btn.setFixedSize(60, 44)
+        self.toggle_btn.setObjectName("showBtn")
+        self.toggle_btn.setFixedHeight(40)
+        self.toggle_btn.setMinimumWidth(55)
         self.toggle_btn.setCheckable(True)
         self.toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.toggle_btn.clicked.connect(self.toggle_password_visibility)
@@ -103,17 +104,17 @@ class LoginDialog(QDialog):
         password_container.addLayout(password_row)
         main_layout.addLayout(password_container)
         
-        main_layout.addSpacing(28)
+        main_layout.addSpacing(24)
         
         # Sign In Button
         self.signin_btn = QPushButton("Sign In")
-        self.signin_btn.setObjectName("signinBtn")
-        self.signin_btn.setMinimumHeight(46)
+        self.signin_btn.setObjectName("primaryBtn")
+        self.signin_btn.setMinimumHeight(44)
         self.signin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.signin_btn.clicked.connect(self.login)
         main_layout.addWidget(self.signin_btn)
         
-        main_layout.addSpacing(24)
+        main_layout.addSpacing(20)
         
         # Divider
         divider = QFrame()
@@ -121,15 +122,15 @@ class LoginDialog(QDialog):
         divider.setObjectName("divider")
         main_layout.addWidget(divider)
         
-        main_layout.addSpacing(20)
+        main_layout.addSpacing(16)
         
         # Register link
         register_layout = QHBoxLayout()
         register_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        register_layout.setSpacing(6)
+        register_layout.setSpacing(4)
         
         register_text = QLabel("Don't have an account?")
-        register_text.setObjectName("linkText")
+        register_text.setObjectName("mutedText")
         register_layout.addWidget(register_text)
         
         register_link = ClickableLabel("Register now")
@@ -138,7 +139,7 @@ class LoginDialog(QDialog):
         register_layout.addWidget(register_link)
         
         main_layout.addLayout(register_layout)
-        main_layout.addSpacing(10)
+        main_layout.addSpacing(8)
         
         # Forgot password link
         forgot_layout = QHBoxLayout()
@@ -160,79 +161,79 @@ class LoginDialog(QDialog):
             }}
             
             QLabel#brandTitle {{
-                font-size: 28px;
+                font-size: 26px;
                 font-weight: bold;
                 color: {COLORS['text_primary']};
             }}
             
             QLabel#brandSubtitle {{
-                font-size: 14px;
+                font-size: 13px;
                 color: {COLORS['text_muted']};
             }}
             
             QLabel#inputLabel {{
-                font-size: 13px;
+                font-size: 12px;
                 font-weight: bold;
                 color: {COLORS['text_secondary']};
             }}
             
-            QLineEdit#modernInput {{
+            QLineEdit#styledInput {{
                 background-color: {COLORS['bg_primary']};
                 border: 2px solid {COLORS['border']};
-                border-radius: 8px;
-                padding-left: 14px;
-                padding-right: 14px;
-                font-size: 14px;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 13px;
                 color: {COLORS['text_primary']};
             }}
             
-            QLineEdit#modernInput:focus {{
+            QLineEdit#styledInput:focus {{
                 border-color: {COLORS['btn_primary']};
             }}
             
-            QLineEdit#modernInput::placeholder {{
+            QLineEdit#styledInput::placeholder {{
                 color: {COLORS['text_muted']};
             }}
             
-            QPushButton#toggleBtn {{
+            QPushButton#showBtn {{
                 background-color: {COLORS['bg_tertiary']};
                 border: 2px solid {COLORS['border']};
-                border-radius: 8px;
+                border-radius: 6px;
                 color: {COLORS['text_secondary']};
-                font-size: 12px;
+                font-size: 11px;
                 font-weight: bold;
+                padding: 0 12px;
             }}
             
-            QPushButton#toggleBtn:hover {{
+            QPushButton#showBtn:hover {{
                 background-color: {COLORS['bg_hover']};
+                border-color: {COLORS['text_muted']};
                 color: {COLORS['text_primary']};
-                border-color: {COLORS['btn_primary']};
             }}
             
-            QPushButton#toggleBtn:checked {{
+            QPushButton#showBtn:checked {{
                 background-color: {COLORS['btn_primary']};
                 border-color: {COLORS['btn_primary']};
                 color: white;
             }}
             
-            QPushButton#signinBtn {{
+            QPushButton#primaryBtn {{
                 background-color: {COLORS['btn_primary']};
                 border: none;
-                border-radius: 8px;
-                font-size: 15px;
+                border-radius: 6px;
+                font-size: 14px;
                 font-weight: bold;
                 color: white;
             }}
             
-            QPushButton#signinBtn:hover {{
+            QPushButton#primaryBtn:hover {{
                 background-color: {COLORS['btn_primary_hover']};
             }}
             
-            QPushButton#signinBtn:pressed {{
+            QPushButton#primaryBtn:pressed {{
                 background-color: #3a80c9;
             }}
             
-            QPushButton#signinBtn:disabled {{
+            QPushButton#primaryBtn:disabled {{
                 background-color: {COLORS['bg_tertiary']};
                 color: {COLORS['text_muted']};
             }}
@@ -243,13 +244,13 @@ class LoginDialog(QDialog):
                 border: none;
             }}
             
-            QLabel#linkText {{
-                font-size: 13px;
+            QLabel#mutedText {{
+                font-size: 12px;
                 color: {COLORS['text_muted']};
             }}
             
             QLabel#linkLabel {{
-                font-size: 13px;
+                font-size: 12px;
                 color: {COLORS['text_link']};
                 font-weight: bold;
             }}
@@ -302,8 +303,7 @@ class LoginDialog(QDialog):
                     config.save_user_data(user_data)
                     set_access_token(access_token)
                     
-                    from aqt.qt import QMessageBox
-                    QMessageBox.information(self, "Success", "Login successful!")
+                    # Just accept - let main dialog show success message
                     self.accept()
                 else:
                     raise Exception("No access token received from server")

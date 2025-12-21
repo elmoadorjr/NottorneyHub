@@ -58,6 +58,9 @@ class DeckManagementDialog(QDialog):
     
     def _rebuild_ui(self):
         """Rebuild the UI (used after login to refresh in-place)"""
+        # Invalidate config cache to ensure fresh login state check
+        config._invalidate_cache()
+        
         # Clear existing layout
         if self.layout():
             old_layout = self.layout()
