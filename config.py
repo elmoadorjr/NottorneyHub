@@ -3,12 +3,14 @@ Configuration management for the AnkiPH addon
 FIXED: Profile-specific deck tracking using collection metadata
 ENHANCED: Added update checking, notification tracking, and sync state management
 ENHANCED: Added subscription-only access support (subscriber, free tier)
-Version: 3.2.0
+ENHANCED: Thread-safe cache operations
+Version: 3.2.1
 """
 
 from aqt import mw
 from datetime import datetime
 import json
+import threading
 
 
 class Config:
@@ -19,55 +21,57 @@ class Config:
         self._config_cache = None
         self._cache_timestamp = 0
         self._cache_timeout = 1.0  # 1 second cache
+        self._cache_lock = threading.Lock()  # Thread safety
         
     def _get_config(self):
-        """Get the addon config from Anki with caching"""
-        try:
-            # Use cache if less than timeout seconds old
-            current_time = datetime.now().timestamp()
-            if self._config_cache and (current_time - self._cache_timestamp) < self._cache_timeout:
-                return self._config_cache
-            
-            # Get config from Anki
-            config = mw.addonManager.getConfig(self.addon_name)
-            
-            if config is None:
-                print(f"⚠ Config is None for {self.addon_name}, using defaults")
-                config = self._get_default_config()
-                # Save default config
-                self._save_config(config)
-            
-            # Ensure all required keys exist
-            default = self._get_default_config()
-            for key, value in default.items():
-                if key not in config:
-                    config[key] = value
-            
-            # === v1.1.0 MIGRATION ===
-            # Force tabbed UI for existing users (one-time migration)
-            migration_needed = False
-            if 'ui_mode' in config:
-                if config.get('ui_mode') == 'minimal':
-                    if not config.get('migrated_to_v1_1_0', False):
-                        print("⚡ Migrating to v1.1.0: Switching to tabbed UI")
-                        config['ui_mode'] = 'tabbed'
-                        config['migrated_to_v1_1_0'] = True
-                        migration_needed = True
-            
-            # Save if migration happened
-            if migration_needed:
-                self._save_config(config)
-            # === END MIGRATION ===
-            
-            # Update cache
-            self._config_cache = config
-            self._cache_timestamp = current_time
-            
-            return config
-            
-        except Exception as e:
-            print(f"✗ Error reading config for {self.addon_name}: {e}")
-            return self._get_default_config()
+        """Get the addon config from Anki with caching and thread safety"""
+        with self._cache_lock:
+            try:
+                # Use cache if less than timeout seconds old
+                current_time = datetime.now().timestamp()
+                if self._config_cache and (current_time - self._cache_timestamp) < self._cache_timeout:
+                    return self._config_cache.copy()  # Return copy to prevent mutations
+                
+                # Get config from Anki
+                config = mw.addonManager.getConfig(self.addon_name)
+                
+                if config is None:
+                    print(f"⚠ Config is None for {self.addon_name}, using defaults")
+                    config = self._get_default_config()
+                    # Save default config
+                    self._save_config(config)
+                
+                # Ensure all required keys exist
+                default = self._get_default_config()
+                for key, value in default.items():
+                    if key not in config:
+                        config[key] = value
+                
+                # === v1.1.0 MIGRATION ===
+                # Force tabbed UI for existing users (one-time migration)
+                migration_needed = False
+                if 'ui_mode' in config:
+                    if config.get('ui_mode') == 'minimal':
+                        if not config.get('migrated_to_v1_1_0', False):
+                            print("⚡ Migrating to v1.1.0: Switching to tabbed UI")
+                            config['ui_mode'] = 'tabbed'
+                            config['migrated_to_v1_1_0'] = True
+                            migration_needed = True
+                
+                # Save if migration happened
+                if migration_needed:
+                    self._save_config(config)
+                # === END MIGRATION ===
+                
+                # Update cache
+                self._config_cache = config.copy()
+                self._cache_timestamp = current_time
+                
+                return config
+                
+            except Exception as e:
+                print(f"✗ Error reading config for {self.addon_name}: {e}")
+                return self._get_default_config()
     
     def _get_default_config(self):
         """Get the default configuration"""
@@ -112,21 +116,24 @@ class Config:
             mw.addonManager.writeConfig(self.addon_name, data_to_save)
             
             # Invalidate cache after save
-            self._config_cache = None
-            self._cache_timestamp = 0
+            with self._cache_lock:
+                self._config_cache = None
+                self._cache_timestamp = 0
             
             return True
             
         except Exception as e:
             print(f"✗ ERROR: Failed to save config: {e}")
-            self._config_cache = None
-            self._cache_timestamp = 0
+            with self._cache_lock:
+                self._config_cache = None
+                self._cache_timestamp = 0
             return False
     
     def _invalidate_cache(self):
-        """Invalidate the config cache"""
-        self._config_cache = None
-        self._cache_timestamp = 0
+        """Invalidate the config cache (thread-safe)"""
+        with self._cache_lock:
+            self._config_cache = None
+            self._cache_timestamp = 0
     
     # === PROFILE-SPECIFIC METADATA STORAGE ===
     

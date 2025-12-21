@@ -3,7 +3,8 @@ Robust API client for AnkiPH Add-on
 ENHANCED: Added update checking, notifications, and AnkiHub-parity endpoints
 ENHANCED: Added subscription-only access support (subscriber, free tier)
 ENHANCED: Added subscription management and v3.0 API alignment
-Version: 3.3.0
+FIXED: Token validation, better error handling, no retry on auth errors
+Version: 3.3.1
 """
 
 from __future__ import annotations
@@ -203,18 +204,25 @@ class ApiClient:
                 time.sleep(wait_time)
                 retries += 1
             except AnkiPHAPIError as e:
-                # Retry on 5xx errors
+                # Don't retry auth errors (401, 403) - they won't succeed on retry
+                if e.status_code and e.status_code in (401, 403):
+                    logger.error(f"Authentication error: {e}")
+                    raise
+                
+                # Retry on 5xx errors (server issues)
                 if e.status_code and 500 <= e.status_code < 600 and retries < max_retries:
                     wait_time = (2 ** retries) + random.random()
                     logger.warning(f"Server error {e.status_code}. Retrying in {wait_time:.1f}s...")
                     time.sleep(wait_time)
                     retries += 1
                 else:
+                    # Other client errors (400, 404, etc.) - don't retry
                     raise
             except Exception as e:
+                # Network errors - retry with backoff
                 if retries < max_retries:
                     wait_time = (2 ** retries) + random.random()
-                    logger.warning(f"Unexpected error: {e}. Retrying in {wait_time:.1f}s...")
+                    logger.warning(f"Network error: {e}. Retrying in {wait_time:.1f}s...")
                     time.sleep(wait_time)
                     retries += 1
                 else:
@@ -438,112 +446,7 @@ class ApiClient:
             "include_media": include_media
         })
 
-    def batch_download_decks(self, deck_ids: List[str]) -> Any:
-        """
-        Download multiple decks at once (max 10 per API docs)
-        
-        Args:
-            deck_ids: List of deck IDs to download (max 10)
-        
-        Returns:
-            API response with download URLs for each deck
-        """
-        if len(deck_ids) > 10:
-            raise ValueError("Maximum 10 decks per batch download")
-        
-        return self.post("/addon-batch-download", json_body={"deck_ids": deck_ids})
-
-    def download_deck_file(self, download_url: str) -> bytes:
-        """Download deck file from signed URL"""
-        if not download_url:
-            raise AnkiPHAPIError("Download URL is required")
-        
-        # Validate URL format
-        if not isinstance(download_url, str):
-            raise AnkiPHAPIError(f"Download URL must be a string, got {type(download_url).__name__}")
-        
-        download_url = download_url.strip()
-        
-        if not download_url.startswith(('http://', 'https://')):
-            # Log what we received for debugging
-            preview = download_url[:100] if len(download_url) > 100 else download_url
-            print(f"✗ Invalid download_url received: {preview}")
-            raise AnkiPHAPIError(f"Invalid download URL format. Expected http/https URL, got: {preview[:50]}...")
-        
-        # Additional URL validation: check for spaces or newlines
-        if any(c in download_url for c in " \n\r\t"):
-            raise AnkiPHAPIError("Download URL contains invalid characters (spaces or newlines)")
-        
-        logger.info(f"Downloading from: {download_url[:80]}...")
-
-        if not _HAS_REQUESTS: 
-            # Use urllib to fetch bytes
-            try:
-                req = _urllib_request.Request(download_url, method="GET")
-                with _urllib_request.urlopen(req, timeout=120) as resp:
-                    content = resp.read()
-                    if len(content) == 0:
-                        raise AnkiPHAPIError("Downloaded file is empty")
-                    return content
-            except Exception as e:
-                raise AnkiPHAPIError(f"Network error while downloading deck: {e}") from e
-
-        # Use requests library
-        try:
-            response = requests.get(download_url, timeout=120, stream=True, allow_redirects=True)
-            response.raise_for_status()
-
-            # Check content type
-            content_type = response.headers.get("Content-Type", "").lower()
-            
-            # Detect HTML/JSON error pages
-            if "text/html" in content_type or "application/json" in content_type:
-                try:
-                    text = response.text[:1000]
-                    if "error" in text.lower() or "expired" in text.lower():
-                        raise AnkiPHAPIError(
-                            "Download URL may be expired or invalid. Please try again."
-                        )
-                except Exception:
-                    pass
-                raise AnkiPHAPIError(
-                    f"Received {content_type} instead of a deck file. URL may be expired."
-                )
-
-            # Check for valid deck file types
-            valid_types = ("application/zip", "application/octet-stream", 
-                          "application/x-zip-compressed", "binary/octet-stream")
-            
-            if content_type and not any(v in content_type for v in valid_types):
-                logger.warning(f"unexpected content-type: {content_type}")
-
-            # Download content
-            content = bytearray()
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk: 
-                    content.extend(chunk)
-
-            if len(content) == 0:
-                raise AnkiPHAPIError("Downloaded file is empty")
-
-            # Quick ZIP signature check (PK magic bytes)
-            if len(content) >= 4:
-                if content[:2] != b"PK":
-                    logger.warning("downloaded file does not appear to be a ZIP file")
-
-            return bytes(content)
-            
-        except requests.HTTPError as he:
-            raise AnkiPHAPIError(
-                f"HTTP error while downloading deck: {he}", 
-                status_code=getattr(he.response, "status_code", None)
-            ) from he
-            
-        except requests.RequestException as re:
-            raise AnkiPHAPIError(f"Network error while downloading deck: {re}") from re
-            
-        except Exception as e:
-            raise AnkiPHAPIError(f"Unexpected error downloading deck: {e}") from e
+    # batch_download_decks & download_deck_file removed in v4.0 (Database-Only Sync)
 
     # === UPDATE CHECKING (NEW) ===
     
@@ -951,39 +854,41 @@ class ApiClient:
 
     # === DATA SYNC (NEW) ===
     
-    def sync_tags(self, deck_id: str, tags: List[Dict]) -> Any:
+    def sync_tags(self, deck_id: str, action: str = "pull", tags: List[Dict] = None) -> Any:
         """
         Sync card tags (v3.0 format)
         
         Args:
             deck_id: The deck UUID
-            tags: List of tag entries
+            action: "pull" or "push"
+            tags: List of tag entries (for push)
                   [{"card_guid": "abc123", "tags": ["tag1", "tag2"]}]
         
         Returns:
-            {"success": true}
+            {"success": true, "tags_added": 0, "tags_removed": 0}
         """
-        return self.post("/addon-sync-tags", json_body={
-            "deck_id": deck_id,
-            "tags": tags
-        })
+        json_body = {"deck_id": deck_id, "action": action}
+        if tags:
+            json_body["tags"] = tags
+        return self.post("/addon-sync-tags", json_body=json_body)
 
-    def sync_suspend_state(self, deck_id: str, states: List[Dict]) -> Any:
+    def sync_suspend_state(self, deck_id: str, action: str = "pull", states: List[Dict] = None) -> Any:
         """
         Sync card suspend/bury states (v3.0 format)
         
         Args:
             deck_id: The deck UUID
-            states: List of state entries
+            action: "pull" or "push"
+            states: List of state entries (for push)
                     [{"card_guid": "abc123", "is_suspended": true, "is_buried": false}]
         
         Returns:
-            {"success": true}
+            {"success": true, "cards_updated": 0}
         """
-        return self.post("/addon-sync-suspend-state", json_body={
-            "deck_id": deck_id,
-            "states": states
-        })
+        json_body = {"deck_id": deck_id, "action": action}
+        if states:
+            json_body["states"] = states
+        return self.post("/addon-sync-suspend-state", json_body=json_body)
 
     def sync_media(self, deck_id: str, action: str, 
                    file_hashes: List[str] = None,
@@ -993,7 +898,7 @@ class ApiClient:
         
         Args:
             deck_id: The deck UUID
-            action: "check" | "upload"
+            action: "check" | "upload" | "download"
             file_hashes: List of file hashes to check (for action="check")
             files: List of files to upload (for action="upload")
                    [{"file_name": "...", "file_hash": "...", "content_base64": "..."}]
@@ -1007,8 +912,8 @@ class ApiClient:
                         {"file_name": "image.png", "file_hash": "hash2", "download_url": "..."}
                     ]
                 }
-            For upload:
-                {"success": true}
+            For upload/download:
+                {"success": true, "files_uploaded": 0, "files_downloaded": 0}
         """
         json_body = {"deck_id": deck_id, "action": action}
         if file_hashes:
@@ -1028,7 +933,7 @@ class ApiClient:
             note_types: List of note types to push
         
         Returns:
-            {"success": true, "note_types": [...]}
+            {"success": true, "note_types": [...], "types_updated": 0}
         """
         body = {"deck_id": deck_id, "action": action}
         if note_types:
@@ -1308,6 +1213,30 @@ class ApiClient:
         return self.post("/addon-get-my-decks", json_body={})
 
 
+# === TOKEN MANAGEMENT HELPERS ===
+
+def check_token_expiry(expires_at_str: Optional[str]) -> bool:
+    """
+    Check if a token has expired
+    
+    Args:
+        expires_at_str: ISO format timestamp string
+    
+    Returns:
+        True if token is expired, False if still valid or can't determine
+    """
+    if not expires_at_str:
+        return False  # Assume valid if no expiry set
+    
+    try:
+        expiry = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
+        now = datetime.now(expiry.tzinfo)
+        return now >= expiry
+    except (ValueError, TypeError, AttributeError):
+        logger.warning(f"Could not parse token expiry: {expires_at_str}")
+        return False  # Assume valid if can't parse
+
+
 # === GLOBAL INSTANCE ===
 
 # Single shared instance
@@ -1315,9 +1244,19 @@ api = ApiClient()
 
 
 def set_access_token(token: Optional[str]) -> None:
-    """Set the access token for API requests"""
-    api.access_token = token
+    """Set the access token for API requests with validation"""
     if token:
-        print("✓ Access token set")
+        # Basic token format validation
+        if not isinstance(token, str):
+            logger.error("Invalid token type - must be string")
+            return
+        
+        if len(token) < 20:
+            logger.warning("Token appears too short - may be invalid")
+            # Still set it, but warn
+        
+        api.access_token = token
+        logger.info("✓ Access token set")
     else:
-        print("✓ Access token cleared")
+        api.access_token = None
+        logger.info("✓ Access token cleared")

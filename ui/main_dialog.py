@@ -15,7 +15,7 @@ from aqt.utils import showInfo, tooltip
 
 from ..api_client import api, set_access_token, AnkiPHAPIError, show_upgrade_prompt
 from ..config import config
-from ..deck_importer import import_deck
+from ..deck_importer import import_deck_from_json
 from ..utils import escape_anki_search
 from ..update_checker import update_checker
 from .styles import COLORS, apply_dark_theme
@@ -649,7 +649,7 @@ class AnkiPHMainDialog(QDialog):
         # Show loading state
         self.setCursor(Qt.CursorShape.WaitCursor)
         self.sync_btn.setEnabled(False)
-        self.sync_btn.setText("Downloading...")
+        self.sync_btn.setText("Syncing...")
         QApplication.processEvents()
         
         try:
@@ -657,45 +657,32 @@ class AnkiPHMainDialog(QDialog):
             if token:
                 set_access_token(token)
             
+            # Get deck data (JSON)
             result = api.download_deck(deck_id)
-            print(f"✓ download_deck response: {result}")
+            print(f"✓ download_deck response: success={result.get('success')}")
             
             if not result.get('success'):
-                raise Exception(result.get('error', 'Download failed'))
+                raise Exception(result.get('error', 'Sync failed'))
             
-            # V3.0 flow: use pull-changes for card data
-            if result.get('use_pull_changes'):
-                self.sync_btn.setText("Fetching cards...")
-                QApplication.processEvents()
-                self._install_from_pull_changes(deck_id, result)
-                return
+            # Use unified JSON import
+            self.sync_btn.setText("Importing data...")
+            QApplication.processEvents()
             
-            # Legacy flow: download .apkg file
-            if result.get('download_url'):
-                download_url = result['download_url']
-                logger.info(f"Got download URL: {download_url[:80]}...")
-                
-                self.sync_btn.setText("Importing...")
-                QApplication.processEvents()
-                
-                deck_content = api.download_deck_file(download_url)
-                anki_deck_id = import_deck(deck_content, deck_name)
-                
-                if anki_deck_id:
-                    config.save_downloaded_deck(
-                        deck_id,
-                        result.get('version', '1.0'),
-                        anki_deck_id,
-                        title=result.get('title', deck_name)
-                    )
-                    tooltip(f"✓ {deck_name} installed!")
-                    self.load_decks()
-                else:
-                    raise Exception("Import failed")
-                return
+            anki_deck_id = import_deck_from_json(result, deck_name)
             
-            raise Exception("No download method available (missing use_pull_changes and download_url)")
-        
+            if anki_deck_id:
+                config.save_downloaded_deck(
+                    deck_id,
+                    result.get('version', '1.0'),
+                    anki_deck_id,
+                    title=result.get('title', deck_name),
+                    card_count=len(result.get('cards', []))
+                )
+                tooltip(f"✓ {deck_name} synced!")
+                self.load_decks()
+            else:
+                raise Exception("Import returned invalid deck ID")
+                
         except Exception as e:
             logger.error(f"Install error: {e}")
             QMessageBox.critical(self, "Error", f"Install failed: {e}")
@@ -1094,39 +1081,42 @@ class DeckBrowserDialog(QDialog):
         deck_name = deck.get('title') or deck.get('name')
         
         self.status.setText("Installing...")
+        QApplication.processEvents()
         
         try:
             token = config.get_access_token()
             if token:
                 set_access_token(token)
             
+            # Get deck data (JSON) directly
             result = api.download_deck(deck_id)
-            print(f"✓ download_deck response: {result}")
+            print(f"✓ download_deck response: success={result.get('success')}")
             
-            if result.get('success') and result.get('download_url'):
-                download_url = result['download_url']
+            if result.get('success'):
+                # Use unified JSON import
+                self.status.setText("Importing data...")
+                QApplication.processEvents()
                 
-                # Download file
-                deck_content = api.download_deck_file(download_url)
-                
-                # Import
-                anki_deck_id = import_deck(deck_content, deck_name)
+                # Import the deck
+                anki_deck_id = import_deck_from_json(result, deck_name)
                 
                 if anki_deck_id:
                     config.save_downloaded_deck(
                         deck_id,
-                        deck.get('version', '1.0'),
-                        anki_deck_id
+                        result.get('version', '1.0'),
+                        anki_deck_id,
+                        title=result.get('title', deck_name),
+                        card_count=len(result.get('cards', []))
                     )
                     QMessageBox.information(self, "Success", f"Subscribed to {deck_name}!")
                     self.accept()
                 else:
-                    raise Exception("Import failed")
+                    raise Exception("Import returned invalid deck ID")
             else:
-                raise Exception(result.get('message', 'No download URL'))
+                raise Exception(result.get('error', 'Sync failed'))
         
         except Exception as e:
-            print(f"✗ Subscribe error: {e}")
+            logger.error(f"Subscribe error: {e}")
             self.status.setText("Failed")
             QMessageBox.critical(self, "Error", f"Subscribe failed: {e}")
 

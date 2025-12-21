@@ -1,7 +1,7 @@
 """
 Update checking service for AnkiPH addon
 Checks for deck updates in the background and notifies users
-Version: 2.1.0
+Version: 2.1.1 - Fixed auto_apply_updates
 """
 
 import threading
@@ -109,6 +109,7 @@ class UpdateChecker:
                         'has_update': True,
                         'update_type': 'standard',
                         'changelog_summary': 'Update available',
+                        'title': deck_update.get('title'),
                         'checked_at': datetime.now().isoformat()
                     }
             
@@ -267,6 +268,8 @@ class UpdateChecker:
             logger.error(f"Failed to get changelog for {deck_id}: {e}")
             return None
     
+    def auto_check_updates_if_needed(self):
+        """Auto-check for updates if interval has passed"""
         if not self.should_check_updates():
             return
         
@@ -291,43 +294,50 @@ class UpdateChecker:
         
         logger.info(f"Auto-applying {len(updates)} update(s)...")
         
-        # Using a callback-based approach or local import to avoid top-level circular dependency
-        # The reported issue was a local import anyway, which is fine, but we can make it cleaner
-        from .deck_importer import import_deck
+        # Import locally to avoid circular dependency at module level
+        from .deck_importer import import_deck_from_json
         
         success_count = 0
         fail_count = 0
         
         for deck_id, update_info in updates.items():
             try:
-                # Get download URL
+                # Set access token before each download attempt
+                token = config.get_access_token()
+                if not token:
+                    logger.error("No access token available for auto-update")
+                    fail_count += 1
+                    continue
+                
+                set_access_token(token)
+                
+                # Get deck data (JSON) directly
                 result = api.download_deck(deck_id)
                 
                 if not result.get('success'):
-                    logger.error(f"Failed to get download URL for {deck_id}")
-                    fail_count += 1
-                    continue
-                
-                download_url = result.get('download_url')
-                if not download_url:
-                    logger.error(f"No download URL for {deck_id}")
-                    fail_count += 1
-                    continue
-                
-                # Download the deck file
-                deck_content = api.download_deck_file(download_url)
-                
-                if not deck_content:
-                    logger.error(f"Failed to download deck file for {deck_id}")
+                    logger.error(f"Failed to get deck data for {deck_id}: {result.get('error', 'Unknown error')}")
                     fail_count += 1
                     continue
                 
                 # Import the deck (synchronous for background operation)
-                anki_deck_id = import_deck(deck_content, f"Update_{deck_id[:8]}")
+                deck_name = update_info.get('title') or f"Update_{deck_id[:8]}"
+                logger.info(f"Syncing deck {deck_name}...")
+                
+                anki_deck_id = import_deck_from_json(result, deck_name)
+                
+                if not anki_deck_id:
+                    logger.error(f"Failed to sync deck {deck_id} - import returned None")
+                    fail_count += 1
+                    continue
                 
                 # Update tracking
                 new_version = update_info.get('latest_version', 'Unknown')
-                config.save_downloaded_deck(deck_id, new_version, anki_deck_id)
+                config.save_downloaded_deck(
+                    deck_id=deck_id,
+                    version=new_version,
+                    anki_deck_id=anki_deck_id,
+                    title=update_info.get('title')
+                )
                 
                 # Clear the update notification
                 self.clear_update(deck_id)
@@ -335,6 +345,10 @@ class UpdateChecker:
                 logger.info(f"Auto-updated deck {deck_id} to v{new_version}")
                 success_count += 1
                 
+            except AnkiPHAPIError as e:
+                logger.error(f"API error auto-updating deck {deck_id}: {e}")
+                fail_count += 1
+                continue
             except Exception as e:
                 logger.exception(f"Failed to auto-update deck {deck_id}: {e}")
                 fail_count += 1
@@ -342,7 +356,7 @@ class UpdateChecker:
         
         # Show summary
         if success_count > 0:
-            tooltip(f"\u2696\ufe0f AnkiPH: Updated {success_count} deck(s)", period=3000)
+            tooltip(f"⚖️ AnkiPH: Synced {success_count} deck(s)", period=3000)
         
         if fail_count > 0:
             logger.warning(f"{fail_count} deck(s) failed to auto-update")

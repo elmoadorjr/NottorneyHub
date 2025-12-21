@@ -11,7 +11,13 @@ from aqt.utils import showInfo, tooltip
 # Global reference to prevent garbage collection
 _dialog_instance = None
 
+# Initialize logger as None first
+logger = None
+
 try:
+    # Import logger FIRST before anything else
+    from .logger import logger
+    
     from .config import config
     from . import sync
     from .api_client import api, set_access_token
@@ -31,7 +37,8 @@ except ImportError as e:
     
     from aqt import gui_hooks
     gui_hooks.main_window_did_init.append(show_startup_error)
-    raise
+    # Don't raise - allow Anki to continue loading
+    pass
 
 
 def show_settings_dialog():
@@ -42,7 +49,8 @@ def show_settings_dialog():
         dialog.exec()
     except Exception as e:
         showInfo(f"Error opening settings:\n{str(e)}")
-        logger.exception(f"Settings dialog error: {e}")
+        if logger:
+            logger.exception(f"Settings dialog error: {e}")
 
 
 def show_main_dialog():
@@ -62,8 +70,10 @@ def show_main_dialog():
         
     except Exception as e:
         showInfo(f"Error opening AnkiPH dialog:\n{str(e)}")
-        logger.exception(f"Dialog error: {e}")
+        if logger:
+            logger.exception(f"Dialog error: {e}")
         _dialog_instance = None
+
 
 def _on_dialog_finished():
     """Cleanup when dialog is closed"""
@@ -78,9 +88,11 @@ def _on_dialog_finished():
             if token:
                 set_access_token(token)
             sync.sync_progress()
-            logger.info("Progress synced successfully after dialog close")
+            if logger:
+                logger.info("Progress synced successfully after dialog close")
         except Exception as e: 
-            logger.warning(f"Sync failed (non-critical): {e}")
+            if logger:
+                logger.warning(f"Sync failed (non-critical): {e}")
 
 
 def on_main_window_did_init():
@@ -109,7 +121,8 @@ def on_main_window_did_init():
                 print(f"Auto-apply updates failed (non-critical): {e}")
                 
     except Exception as e:
-        logger.warning(f"AnkiPH startup check failed (non-critical): {e}")
+        if logger:
+            logger.warning(f"AnkiPH startup check failed (non-critical): {e}")
 
 
 def setup_menu():
@@ -129,11 +142,13 @@ def setup_menu():
         help_menu = mw.form.menuHelp
         menubar.insertMenu(help_menu.menuAction(), ankiph_menu)
         
-        logger.info(f"AnkiPH addon v{ADDON_VERSION} loaded successfully")
-        logger.info(f"Auto-update check: {config.get_auto_check_updates()}")
+        if logger:
+            logger.info(f"AnkiPH addon v{ADDON_VERSION} loaded successfully")
+            logger.info(f"Auto-update check: {config.get_auto_check_updates()}")
         
     except Exception as e:
-        logger.error(f"Error setting up AnkiPH menu: {e}")
+        if logger:
+            logger.error(f"Error setting up AnkiPH menu: {e}")
         showInfo(f"AnkiPH addon failed to load:\n{str(e)}")
 
 
@@ -144,4 +159,3 @@ try:
 except Exception as e:
     print(f"✗ Fatal error loading AnkiPH addon: {e}")
     showInfo(f"Fatal error loading AnkiPH addon:\n{str(e)}")
-
