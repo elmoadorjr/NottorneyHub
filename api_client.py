@@ -30,31 +30,40 @@ except Exception:
     _HAS_REQUESTS = False
 
 
-# === SUBSCRIPTION ACCESS SYSTEM (v3.2 - subscription-only) ===
+# === ACCESS SYSTEM (v4.0 - unified access control) ===
 
 class AccessTier(Enum):
-    """User access tier for AnkiPH"""
-    LIFETIME_SUBSCRIBER = "lifetime_subscriber"  # Full access, never expires
-    SUBSCRIBER = "subscriber"                    # Full access via active subscription
-    FREE_TIER = "free_tier"                      # Limited to is_free decks only
+    """User access tier for AnkiPH (v4.0)"""
+    ADMIN = "admin"                              # User has admin role
+    COLLECTION_OWNER = "collection_owner"        # Purchased full collection (₱1000)
+    SUBSCRIBER = "subscriber"                    # Active Anki PH subscription
+    DECK_SUBSCRIBER = "deck_subscriber"          # Subscribed to specific deck
+    LEGACY_PURCHASE = "legacy_purchase"          # Purchased deck individually (old)
+    FREE_TIER = "free_tier"                      # Deck is marked as free
+    PUBLIC_DECK = "public_deck"                  # Deck is public
 
 
 def check_access(user_data: dict, deck: dict) -> Optional[AccessTier]:
     """
-    Determine user's access tier for a specific deck.
+    Determine user's access tier for a specific deck (v4.0).
+    Follows the unified access hierarchy from the API.
     
     Args:
-        user_data: Dict with has_subscription, subscription_expires_at, is_lifetime
+        user_data: Dict with is_admin, owns_collection, has_subscription
         deck: Dict with access_type field from API response
     
     Returns:
         AccessTier enum value, or None if no access
     """
-    # Tier 1: Lifetime subscribers get everything
-    if user_data.get("is_lifetime"):
-        return AccessTier.LIFETIME_SUBSCRIBER
+    # Priority 1: Admin
+    if user_data.get("is_admin"):
+        return AccessTier.ADMIN
     
-    # Tier 2: Active subscribers get everything
+    # Priority 2: Collection owner (₱1000 lifetime)
+    if user_data.get("owns_collection"):
+        return AccessTier.COLLECTION_OWNER
+    
+    # Priority 3: Active premium subscription
     if user_data.get("has_subscription"):
         expires = user_data.get("subscription_expires_at")
         if expires:
@@ -63,16 +72,20 @@ def check_access(user_data: dict, deck: dict) -> Optional[AccessTier]:
                 if expiry > datetime.now(expiry.tzinfo):
                     return AccessTier.SUBSCRIBER
             except (ValueError, TypeError):
-                # If can't parse, assume still valid
                 return AccessTier.SUBSCRIBER
         else:
-            # No expiry set, assume active
             return AccessTier.SUBSCRIBER
     
-    # Tier 3: Free tier - only is_free decks
+    # Priority 4-6: Check deck-level access from API response
     access_type = deck.get("access_type", "")
+    if access_type == "deck_subscriber":
+        return AccessTier.DECK_SUBSCRIBER
+    if access_type == "legacy_purchase":
+        return AccessTier.LEGACY_PURCHASE
     if access_type == "free_tier":
         return AccessTier.FREE_TIER
+    if access_type == "public_deck":
+        return AccessTier.PUBLIC_DECK
     
     return None  # No access
 
@@ -80,7 +93,7 @@ def check_access(user_data: dict, deck: dict) -> Optional[AccessTier]:
 def can_sync_updates(tier: Optional[AccessTier]) -> bool:
     """
     Check if user's tier allows syncing updates.
-    Free tier users cannot sync updates - they only get initial download.
+    Free tier and public deck users cannot sync updates.
     
     Args:
         tier: The user's AccessTier
@@ -90,7 +103,13 @@ def can_sync_updates(tier: Optional[AccessTier]) -> bool:
     """
     if tier is None:
         return False
-    return tier in [AccessTier.LIFETIME_SUBSCRIBER, AccessTier.SUBSCRIBER]
+    return tier in [
+        AccessTier.ADMIN,
+        AccessTier.COLLECTION_OWNER,
+        AccessTier.SUBSCRIBER,
+        AccessTier.DECK_SUBSCRIBER,
+        AccessTier.LEGACY_PURCHASE
+    ]
 
 
 def show_upgrade_prompt():
@@ -130,6 +149,13 @@ class AnkiPHAPIError(Exception):
         super().__init__(message)
         self.status_code = status_code
         self.details = details
+
+
+class AnkiPHRateLimitError(AnkiPHAPIError):
+    """Exception for API rate limiting (429)"""
+    def __init__(self, message: str, retry_after: int, details: Optional[Any] = None):
+        super().__init__(message, status_code=429, details=details)
+        self.retry_after = retry_after
 
 
 class ApiClient:
@@ -175,6 +201,27 @@ class ApiClient:
         except Exception as e:
             raise AnkiPHAPIError(f"Network error: {e}") from e
 
+        # Handle Rate Limiting (429)
+        if resp.status_code == 429:
+            retry_after = 60
+            try:
+                retry_after = int(resp.headers.get('Retry-After', 60))
+            except (ValueError, TypeError):
+                pass
+                
+            try:
+                data = resp.json()
+                err_msg = data.get("error", "Rate limit exceeded")
+            except Exception:
+                data = None
+                err_msg = "Rate limit exceeded"
+                
+            raise AnkiPHRateLimitError(
+                f"{err_msg}. Retry in {retry_after} seconds.", 
+                retry_after=retry_after,
+                details=data
+            )
+
         # Parse response
         try:
             data = resp.json()
@@ -218,6 +265,21 @@ class ApiClient:
                         details=raw[:500]
                     )
                 
+                if resp.getcode() == 429:
+                    headers = dict(resp.info())
+                    retry_after = 60
+                    try:
+                        retry_after = int(headers.get('Retry-After', 60))
+                    except (ValueError, TypeError):
+                        pass
+                        
+                    err_msg = data.get("error") if isinstance(data, dict) else "Rate limit exceeded"
+                    raise AnkiPHRateLimitError(
+                        f"{err_msg}. Retry in {retry_after} seconds.",
+                        retry_after=retry_after,
+                        details=data
+                    )
+
                 if resp.getcode() >= 400:
                     err_msg = data.get("error") if isinstance(data, dict) else None
                     raise AnkiPHAPIError(
@@ -236,6 +298,20 @@ class ApiClient:
             except Exception:
                 parsed = None
                 err_msg = None
+            
+            # Handle 429 in HTTPError context if needed (urllib raises HTTPError for 429)
+            if getattr(he, "code", 0) == 429:
+                retry_after = 60
+                try:
+                    retry_after = int(he.headers.get('Retry-After', 60))
+                except (ValueError, TypeError, AttributeError):
+                    pass
+
+                raise AnkiPHRateLimitError(
+                    f"Rate limit exceeded. Retry in {retry_after} seconds.",
+                    retry_after=retry_after,
+                    details=parsed
+                )
             
             raise AnkiPHAPIError(
                 err_msg or f"HTTP {getattr(he, 'code', 'error')}", 
@@ -276,7 +352,9 @@ class ApiClient:
     def browse_decks(self, category: str = "all", search: Optional[str] = None,
                      page: int = 1, limit: int = 20) -> Any:
         """
-        Browse available decks (v3.0 format)
+        Browse available decks (v4.0 format)
+        Note: subscribe/unsubscribe actions are removed from this endpoint.
+        Use manage_subscription() instead.
         
         Args:
             category: "all" | "featured" | "community" | "subscribed"
@@ -294,6 +372,7 @@ class ApiClient:
             }
         """
         json_body = {
+            "action": "list",
             "category": category,
             "page": page,
             "limit": min(limit, 100)
@@ -434,25 +513,10 @@ class ApiClient:
     # === UPDATE CHECKING (NEW) ===
     
     def check_updates(self) -> Any:
-        """
-        Check for updates on all purchased decks
-        
-        Returns:
-            {
-                "success": true,
-                "decks": [
-                    {
-                        "deck_id": "abc123",
-                        "current_version": "1.0.0",
-                        "latest_version": "1.2.0",
-                        "has_update": true,
-                        "update_type": "minor",
-                        "changelog_summary": "Added 50 new cards"
-                    }
-                ]
-            }
-        """
-        return self.post("/addon-check-updates")
+        # V4: POST /addon-check-updates with empty body
+        # Returns: {"success": true, "decks": [...]} with new deck format
+        # See migration guide for full response structure.
+        return self.post("/addon-check-updates", json_body={})
 
     def check_deck_updates(self, deck_id: str, current_version: str,
                           last_sync_timestamp: Optional[str] = None) -> Any:
@@ -511,13 +575,13 @@ class ApiClient:
                 {
                     "success": true,
                     "subscription": {
-                        "id": "uuid",
                         "deck_id": "uuid",
-                        "user_id": "uuid",
-                        "sync_enabled": true,
-                        "notify_updates": true,
-                        "last_synced_at": "2025-01-15T10:00:00Z",
-                        "subscribed_at": "2025-01-01T00:00:00Z"
+                        "current_version": "1.0.0",
+                        "latest_version": "1.0.1",
+                        "has_update": true,
+                        "update_type": "standard",
+                        "changelog_summary": "Update available",
+                        "checked_at": "2025-01-15T10:00:00Z"
                     },
                     "deck": {...},
                     "access": {...}
@@ -598,30 +662,32 @@ class ApiClient:
     def sync_progress(self, deck_id: str = None, progress: Dict = None,
                       progress_data: List[Dict] = None) -> Any:
         """
-        Sync study progress to server (v3.0 format)
+        Sync study progress to server (v4.0 format)
         
-        Can be called in two modes:
-        1. Single deck: deck_id + progress dict
-        2. Batch: progress_data list (legacy support)
+        V4 expects a 'progress' array at the top level.
         
         Args:
-            deck_id: The deck UUID (for single-deck sync)
+            deck_id: The deck UUID (for single-deck sync, will be wrapped)
             progress: Progress data dict (for single-deck sync)
-            progress_data: List of progress entries (for batch sync, legacy)
+            progress_data: List of progress entries (batch format)
         
         Returns:
             {"success": true, "synced_at": "...", "leaderboard_updated": true}
         """
         if deck_id and progress:
-            # v3.0 single-deck format
+            # V4 format: wrap single deck in progress array
+            progress_entry = {"deck_id": deck_id, **progress}
             return self.post("/addon-sync-progress", json_body={
-                "deck_id": deck_id,
-                "progress": progress
+                "progress": [progress_entry]
+            })
+        elif progress_data:
+            # Batch format - already an array
+            return self.post("/addon-sync-progress", json_body={
+                "progress": progress_data
             })
         else:
-            # Legacy batch format
             return self.post("/addon-sync-progress", json_body={
-                "progress_data": progress_data or []
+                "progress": []
             })
 
     # === ANKIHUB-PARITY: COLLABORATIVE FEATURES (NEW) ===

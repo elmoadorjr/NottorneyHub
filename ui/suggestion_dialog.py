@@ -1,7 +1,7 @@
 """
 Card Suggestion Dialog for AnkiPH Addon
 Features: Submit card improvement suggestions to deck maintainers
-Version: 2.1.0
+Version: 4.0.0 - Refactored with shared styles
 """
 
 from aqt.qt import (
@@ -14,6 +14,7 @@ from aqt import mw
 
 from ..api_client import api, set_access_token, AnkiPHAPIError
 from ..config import config
+from .styles import COLORS, apply_dark_theme
 
 
 class SuggestionDialog(QDialog):
@@ -26,9 +27,10 @@ class SuggestionDialog(QDialog):
         self.deck_name = deck_name or f"Deck {deck_id[:8]}"
         self.current_fields = {}
         
-        self.setWindowTitle(f"💡 Suggest Improvement")
+        self.setWindowTitle(f"Suggest Improvement")
         self.setMinimumSize(550, 500)
         self.setup_ui()
+        apply_dark_theme(self)
         self.load_card_fields()
     
     def setup_ui(self):
@@ -269,9 +271,10 @@ class CardSuggestionBrowser(QDialog):
         self.deck_id = deck_id
         self.deck_name = deck_name or f"Deck {deck_id[:8]}"
         
-        self.setWindowTitle(f"💡 Suggest Card Improvement - {self.deck_name}")
+        self.setWindowTitle(f"Suggest Card Improvement - {self.deck_name}")
         self.setMinimumSize(600, 400)
         self.setup_ui()
+        apply_dark_theme(self)
         self.load_cards()
     
     def setup_ui(self):

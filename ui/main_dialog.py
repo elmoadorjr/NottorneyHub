@@ -1,7 +1,7 @@
 """
 Deck Management Dialog for AnkiPH Addon
 AnkiHub-style two-panel layout with deck list and details
-Version: 3.3.0
+Version: 4.0.0 - Refactored with shared styles
 """
 
 import webbrowser
@@ -19,6 +19,7 @@ from ..deck_importer import import_deck
 from ..utils import escape_anki_search
 from ..update_checker import update_checker
 from ..constants import HOMEPAGE_URL, TERMS_URL, PRIVACY_URL, PLANS_URL, COMMUNITY_URL
+from .styles import COLORS, apply_dark_theme
 
 
 class DeckManagementDialog(QDialog):
@@ -266,191 +267,196 @@ class DeckManagementDialog(QDialog):
         return bar
     
     def apply_styles(self):
-        """Apply dark theme styles matching AnkiHub"""
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1e1e1e;
-                color: #e0e0e0;
-            }
+        """Apply dark theme styles using shared COLORS"""
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {COLORS["bg_primary"]};
+                color: {COLORS["text_primary"]};
+            }}
             
-            #actionBar {
-                background-color: #252525;
-                border-bottom: 1px solid #333;
-            }
+            #actionBar {{
+                background-color: {COLORS["bg_tertiary"]};
+                border-bottom: 1px solid {COLORS["border"]};
+            }}
             
-            #primaryBtn {
-                background-color: #4a90d9;
+            #primaryBtn {{
+                background-color: {COLORS["btn_primary"]};
                 color: white;
                 border: none;
-                border-radius: 4px;
+                border-radius: 6px;
                 padding: 10px 24px;
                 font-weight: bold;
                 font-size: 13px;
-            }
-            #primaryBtn:hover {
-                background-color: #5a9fe9;
-            }
+            }}
+            #primaryBtn:hover {{
+                background-color: {COLORS["btn_primary_hover"]};
+            }}
             
-            #secondaryBtn {
+            #secondaryBtn {{
                 background-color: transparent;
-                color: #aaa;
-                border: 1px solid #555;
-                border-radius: 4px;
+                color: {COLORS["text_secondary"]};
+                border: 1px solid {COLORS["border"]};
+                border-radius: 6px;
                 padding: 10px 24px;
                 font-size: 13px;
-            }
-            #secondaryBtn:hover {
-                border-color: #888;
-                color: #fff;
-            }
+            }}
+            #secondaryBtn:hover {{
+                border-color: {COLORS["text_muted"]};
+                color: {COLORS["text_primary"]};
+            }}
             
-            #leftPanel {
-                background-color: #1e1e1e;
-                border-right: 1px solid #333;
-            }
+            #leftPanel {{
+                background-color: {COLORS["bg_primary"]};
+                border-right: 1px solid {COLORS["border"]};
+            }}
             
-            #panelHeader {
-                background-color: #252525;
-                color: #fff;
+            #panelHeader {{
+                background-color: {COLORS["bg_tertiary"]};
+                color: {COLORS["text_primary"]};
                 font-weight: bold;
                 font-size: 12px;
                 padding: 12px 15px;
-                border-bottom: 1px solid #333;
-            }
+                border-bottom: 1px solid {COLORS["border"]};
+            }}
             
-            #deckList {
-                background-color: #1e1e1e;
+            #deckList {{
+                background-color: {COLORS["bg_primary"]};
                 border: none;
-                color: #e0e0e0;
+                color: {COLORS["text_primary"]};
                 font-size: 13px;
-            }
-            #deckList::item {
-                padding: 10px 15px;
-                border-bottom: 1px solid #2a2a2a;
-            }
-            #deckList::item:selected {
-                background-color: #3a5070;
+            }}
+            #deckList::item {{
+                padding: 12px 15px;
+                border-bottom: 1px solid {COLORS["bg_secondary"]};
+                border-radius: 4px;
+                margin: 2px 4px;
+            }}
+            #deckList::item:selected {{
+                background-color: {COLORS["bg_selected"]};
                 color: white;
-            }
-            #deckList::item:hover:!selected {
-                background-color: #2a2a2a;
-            }
+            }}
+            #deckList::item:hover:!selected {{
+                background-color: {COLORS["bg_hover"]};
+            }}
             
-            #rightPanel {
-                background-color: #1e1e1e;
-            }
+            #rightPanel {{
+                background-color: {COLORS["bg_primary"]};
+            }}
             
-            #detailTitle {
-                color: #4a90d9;
+            #detailTitle {{
+                color: {COLORS["btn_primary"]};
                 font-size: 18px;
                 font-weight: bold;
-            }
+            }}
             
-            #outlineBtn {
+            #outlineBtn {{
                 background-color: transparent;
-                color: #aaa;
-                border: 1px solid #555;
-                border-radius: 4px;
+                color: {COLORS["text_secondary"]};
+                border: 1px solid {COLORS["border"]};
+                border-radius: 6px;
                 padding: 8px 16px;
                 font-size: 12px;
-            }
-            #outlineBtn:hover {
-                border-color: #888;
-                color: #fff;
-            }
-            #outlineBtn:disabled {
-                color: #555;
-                border-color: #333;
-            }
+            }}
+            #outlineBtn:hover {{
+                border-color: {COLORS["text_muted"]};
+                color: {COLORS["text_primary"]};
+            }}
+            #outlineBtn:disabled {{
+                color: {COLORS["border"]};
+                border-color: {COLORS["bg_tertiary"]};
+            }}
             
-            #dangerOutlineBtn {
+            #dangerOutlineBtn {{
                 background-color: transparent;
-                color: #e57373;
-                border: 1px solid #e57373;
-                border-radius: 4px;
+                color: {COLORS["error"]};
+                border: 1px solid {COLORS["error"]};
+                border-radius: 6px;
                 padding: 8px 16px;
                 font-size: 12px;
-            }
-            #dangerOutlineBtn:hover {
-                background-color: #e57373;
+            }}
+            #dangerOutlineBtn:hover {{
+                background-color: {COLORS["error"]};
                 color: white;
-            }
-            #dangerOutlineBtn:disabled {
-                color: #555;
-                border-color: #333;
-            }
+            }}
+            #dangerOutlineBtn:disabled {{
+                color: {COLORS["border"]};
+                border-color: {COLORS["bg_tertiary"]};
+            }}
             
-            #separator {
-                color: #333;
-            }
+            #separator {{
+                color: {COLORS["border"]};
+            }}
             
-            #sectionHeader {
-                color: #fff;
+            #sectionHeader {{
+                color: {COLORS["text_primary"]};
                 font-weight: bold;
                 font-size: 13px;
                 margin-top: 5px;
-            }
+            }}
             
-            #installStatus {
-                color: #ffa726;
+            #installStatus {{
+                color: {COLORS["warning"]};
                 font-size: 12px;
-            }
+            }}
             
-            #syncBtn {
-                background-color: #4a90d9;
+            #syncBtn {{
+                background-color: {COLORS["btn_primary"]};
                 color: white;
                 border: none;
-                border-radius: 4px;
+                border-radius: 6px;
                 padding: 10px 20px;
                 font-size: 13px;
-            }
-            #syncBtn:hover {
-                background-color: #5a9fe9;
-            }
+                font-weight: bold;
+            }}
+            #syncBtn:hover {{
+                background-color: {COLORS["btn_primary_hover"]};
+            }}
             
-            #infoLabel {
-                color: #888;
+            #infoLabel {{
+                color: {COLORS["text_muted"]};
                 font-size: 12px;
-            }
+            }}
             
-            #statusBar {
-                background-color: #252525;
-                border-top: 1px solid #333;
-            }
+            #statusBar {{
+                background-color: {COLORS["bg_tertiary"]};
+                border-top: 1px solid {COLORS["border"]};
+            }}
             
-            #statusText {
-                color: #888;
+            #statusText {{
+                color: {COLORS["text_muted"]};
                 font-size: 11px;
-            }
+            }}
             
-            #subscriptionBadge {
-                background-color: #4CAF50;
+            #subscriptionBadge {{
+                background-color: {COLORS["success"]};
                 color: white;
-                padding: 3px 10px;
-                border-radius: 10px;
+                padding: 4px 12px;
+                border-radius: 12px;
                 font-size: 10px;
-            }
+                font-weight: bold;
+            }}
             
-            #freeBadge {
-                background-color: #FF9800;
+            #freeBadge {{
+                background-color: {COLORS["warning"]};
                 color: white;
-                padding: 3px 10px;
-                border-radius: 10px;
+                padding: 4px 12px;
+                border-radius: 12px;
                 font-size: 10px;
-            }
+                font-weight: bold;
+            }}
             
-            #linkBtn {
+            #linkBtn {{
                 background: transparent;
                 border: none;
-                color: #4a90d9;
+                color: {COLORS["text_link"]};
                 font-size: 12px;
                 padding: 5px 10px;
-            }
-            #linkBtn:hover {
-                color: #6ab0f9;
-                text-decoration: underline;
-            }
+            }}
+            #linkBtn:hover {{
+                color: {COLORS["btn_primary_hover"]};
+            }}
         """)
+
     
     # === DATA LOADING ===
     
@@ -609,8 +615,7 @@ class DeckManagementDialog(QDialog):
         dialog = CreateDeckConfirmDialog(self)
         if dialog.exec():
             # Open deck creation form
-            from .tabbed_dialog import TabbedDialog
-            # For now, just show info - full creation UI would be added later
+            # Deck creation is done on the web
             showInfo("Deck creation feature coming soon!\n\nYou can create decks at:\n" + HOMEPAGE_URL)
     
     def sync_install_deck(self):
@@ -965,8 +970,9 @@ class DeckBrowserDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Browse Decks")
-        self.setMinimumSize(450, 350)
+        self.setMinimumSize(500, 400)
         self.setup_ui()
+        apply_dark_theme(self)
     
     def setup_ui(self):
         layout = QVBoxLayout()
@@ -989,11 +995,13 @@ class DeckBrowserDialog(QDialog):
         # Buttons
         btn_row = QHBoxLayout()
         
-        sub_btn = QPushButton("Subscribe")
-        sub_btn.clicked.connect(self.subscribe_selected)
-        btn_row.addWidget(sub_btn)
-        
         btn_row.addStretch()
+        
+        sub_btn = QPushButton("Subscribe")
+        sub_btn.setStyleSheet(f"background-color: {COLORS['btn_primary']}; color: white; padding: 10px 20px; border: none; border-radius: 6px; font-weight: bold;")
+        btn_row.addWidget(sub_btn)
+        sub_btn.clicked.connect(self.subscribe_selected)
+        
         
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.reject)
@@ -1115,10 +1123,11 @@ class SyncInstallDialog(QDialog):
     def __init__(self, parent=None, deck_names=None):
         super().__init__(parent)
         self.setWindowTitle("AnkiPH | Sync")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(450)
         self.deck_names = deck_names or []
         self.use_recommended_settings = True
         self.setup_ui()
+        apply_dark_theme(self)
     
     def setup_ui(self):
         layout = QVBoxLayout()
@@ -1178,8 +1187,9 @@ class CreateDeckConfirmDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Confirm AnkiPH Deck Creation")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(450)
         self.setup_ui()
+        apply_dark_theme(self)
     
     def setup_ui(self):
         layout = QVBoxLayout()

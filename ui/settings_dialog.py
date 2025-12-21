@@ -1,7 +1,7 @@
 """
 Settings Dialog for AnkiPH Addon
 Features: General settings, Protected Fields, Sync, Admin (for admins)
-Version: 2.1.0
+Version: 4.0.0 - Refactored with shared styles
 """
 
 from aqt.qt import (
@@ -20,6 +20,7 @@ from ..constants import (
     ADDON_VERSION, HOMEPAGE_URL, DOCS_URL, HELP_URL,
     TERMS_URL, PRIVACY_URL, CHANGELOG_URL
 )
+from .styles import COLORS, apply_dark_theme
 
 
 def ensure_valid_token():
@@ -65,9 +66,10 @@ class SettingsDialog(QDialog):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("⚙️ AnkiPH Settings")
+        self.setWindowTitle("AnkiPH Settings")
         self.setMinimumSize(600, 500)
         self.setup_ui()
+        apply_dark_theme(self)
         self.load_settings()
     
     def setup_ui(self):

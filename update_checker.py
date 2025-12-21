@@ -104,11 +104,11 @@ class UpdateChecker:
                 if has_update:
                     updates_dict[deck_id] = {
                         'deck_id': deck_id,
-                        'current_version': deck_update.get('current_version'),
-                        'latest_version': deck_update.get('latest_version'),
+                        'current_version': deck_update.get('synced_version'),
+                        'latest_version': deck_update.get('current_version'),
                         'has_update': True,
-                        'update_type': deck_update.get('update_type', 'minor'),
-                        'changelog_summary': deck_update.get('changelog_summary', 'Updates available'),
+                        'update_type': 'standard',
+                        'changelog_summary': 'Update available',
                         'checked_at': datetime.now().isoformat()
                     }
             

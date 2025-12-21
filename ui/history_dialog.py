@@ -1,7 +1,7 @@
 """
 Card History Dialog for AnkiPH Addon
 Features: View card change history, Rollback to previous versions
-Version: 2.1.0
+Version: 4.0.0 - Refactored with shared styles
 """
 
 from aqt.qt import (
@@ -14,6 +14,7 @@ from aqt import mw
 
 from ..api_client import api, set_access_token, AnkiPHAPIError
 from ..config import config
+from .styles import COLORS, apply_dark_theme
 
 
 class CardHistoryDialog(QDialog):
@@ -26,9 +27,10 @@ class CardHistoryDialog(QDialog):
         self.deck_name = deck_name or f"Deck {deck_id[:8]}"
         self.history = []
         
-        self.setWindowTitle(f"📜 Card History - {card_guid[:12]}...")
+        self.setWindowTitle(f"Card History - {card_guid[:12]}...")
         self.setMinimumSize(700, 550)
         self.setup_ui()
+        apply_dark_theme(self)
         self.load_history()
     
     def setup_ui(self):
@@ -316,9 +318,10 @@ class DeckHistoryBrowser(QDialog):
         self.deck_id = deck_id
         self.deck_name = deck_name or f"Deck {deck_id[:8]}"
         
-        self.setWindowTitle(f"📜 Browse Card History - {self.deck_name}")
+        self.setWindowTitle(f"Browse Card History - {self.deck_name}")
         self.setMinimumSize(600, 400)
         self.setup_ui()
+        apply_dark_theme(self)
         self.load_cards()
     
     def setup_ui(self):

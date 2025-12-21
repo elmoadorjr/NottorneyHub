@@ -1,7 +1,7 @@
 """
 Login Dialog for AnkiPH Addon
 AnkiHub-style login UI with modern dark theme
-Version: 3.1.0
+Version: 4.0.0 - Refactored with shared styles
 """
 
 import webbrowser
@@ -14,6 +14,7 @@ from aqt import mw
 from ..api_client import api, set_access_token, AnkiPHAPIError
 from ..config import config
 from ..constants import REGISTER_URL, FORGOT_PASSWORD_URL
+from .styles import COLORS, DARK_THEME
 
 
 class LoginDialog(QDialog):
@@ -28,70 +29,30 @@ class LoginDialog(QDialog):
         self.apply_dark_theme()
     
     def apply_dark_theme(self):
-        """Apply dark theme styling to match AnkiHub"""
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #2d2d2d;
-            }
-            QLabel {
-                color: #ffffff;
-                font-size: 13px;
-            }
-            QLabel#title_label {
+        """Apply dark theme styling using shared styles"""
+        # Use shared dark theme with login-specific overrides
+        self.setStyleSheet(DARK_THEME + f"""
+            QLabel#title_label {{
                 font-size: 14px;
                 font-weight: bold;
-            }
-            QLineEdit {
-                background-color: #1e1e1e;
-                border: 1px solid #555555;
-                border-radius: 4px;
-                padding: 8px 12px;
-                color: #ffffff;
-                font-size: 13px;
+            }}
+            QPushButton#show_btn {{
+                background-color: {COLORS['btn_secondary']};
                 min-height: 20px;
-            }
-            QLineEdit:focus {
-                border-color: #4a90d9;
-            }
-            QLineEdit::placeholder {
-                color: #888888;
-            }
-            QPushButton#show_btn {
-                background-color: #555555;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                color: #ffffff;
-                font-size: 12px;
-                min-height: 20px;
-            }
-            QPushButton#show_btn:hover {
-                background-color: #666666;
-            }
-            QPushButton#signin_btn {
-                background-color: #555555;
-                border: none;
-                border-radius: 4px;
-                padding: 10px;
-                color: #ffffff;
-                font-size: 13px;
+            }}
+            QPushButton#signin_btn {{
+                background-color: {COLORS['btn_primary']};
                 font-weight: bold;
                 min-height: 24px;
-            }
-            QPushButton#signin_btn:hover {
-                background-color: #666666;
-            }
-            QPushButton#signin_btn:pressed {
-                background-color: #444444;
-            }
-            QLabel#link_label {
-                color: #6bb3f8;
+                padding: 10px;
+            }}
+            QPushButton#signin_btn:hover {{
+                background-color: {COLORS['btn_primary_hover']};
+            }}
+            QLabel#link_label {{
+                color: {COLORS['text_link']};
                 font-size: 12px;
-            }
-            QLabel#link_label:hover {
-                color: #8cc8ff;
-                text-decoration: underline;
-            }
+            }}
         """)
     
     def setup_ui(self):
