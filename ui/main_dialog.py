@@ -61,14 +61,20 @@ class DeckManagementDialog(QDialog):
         # Invalidate config cache to ensure fresh login state check
         config._invalidate_cache()
         
-        # Clear existing layout
+        # Clear existing layout and widgets properly
         if self.layout():
             old_layout = self.layout()
+            # Delete all child widgets
             while old_layout.count():
                 child = old_layout.takeAt(0)
                 if child.widget():
                     child.widget().deleteLater()
-            QWidget().setLayout(old_layout)
+            # Delete the layout itself - just orphaning it doesn't work in Qt
+            # Qt requires us to delete the layout from its parent
+            old_layout.deleteLater()
+        
+        # Force processing of deleteLater events before creating new layout
+        QApplication.processEvents()
         
         # Rebuild
         self.setup_ui()
