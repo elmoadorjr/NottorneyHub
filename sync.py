@@ -122,25 +122,31 @@ def calculate_retention_rate(deck_id: int) -> float:
             return 0.0
         
         # Use parameterized query with placeholders (prevent SQL injection)
-        placeholders = ",".join("?" * len(valid_card_ids))
+        # Chunk the IDs to avoid SQLite limit (999 variables)
+        total_reviews = 0
+        correct_reviews = 0
+        chunk_size = 999
         
-        # Query review log with parameterized values
-        query = f"""
-            SELECT 
-                COUNT(*) as total_reviews,
-                SUM(CASE WHEN ease >= 2 THEN 1 ELSE 0 END) as correct_reviews
-            FROM revlog
-            WHERE cid IN ({placeholders})
-            AND id >= ?
-        """
+        for i in range(0, len(valid_card_ids), chunk_size):
+            chunk = valid_card_ids[i:i + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            
+            query = f"""
+                SELECT 
+                    COUNT(*) as total_reviews,
+                    SUM(CASE WHEN ease >= 2 THEN 1 ELSE 0 END) as correct_reviews
+                FROM revlog
+                WHERE cid IN ({placeholders})
+                AND id >= ?
+            """
+            
+            res = mw.col.db.first(query, *chunk, cutoff_time)
+            if res:
+                total_reviews += res[0] or 0
+                correct_reviews += res[1] or 0
         
-        result = mw.col.db.first(query, *valid_card_ids, cutoff_time)
-        
-        if not result or result[0] == 0:
+        if total_reviews == 0:
             return 0.0
-        
-        total_reviews = result[0]
-        correct_reviews = result[1] or 0
         
         # Calculate percentage
         retention_rate = (correct_reviews / total_reviews) * 100
@@ -178,20 +184,29 @@ def calculate_current_streak(deck_id: int) -> int:
             return 0
         
         # Use parameterized query with placeholders (prevent SQL injection)
-        placeholders = ",".join("?" * len(valid_card_ids))
+        # Chunk the IDs to avoid SQLite limit (999 variables)
+        review_dates = set()
+        chunk_size = 999
         
-        # Get distinct review dates
-        query = f"""
-            SELECT DISTINCT DATE(id / 1000, 'unixepoch', 'localtime') as review_date
-            FROM revlog
-            WHERE cid IN ({placeholders})
-            ORDER BY review_date DESC
-        """
-        
-        review_dates = mw.col.db.list(query, *valid_card_ids)
+        for i in range(0, len(valid_card_ids), chunk_size):
+            chunk = valid_card_ids[i:i + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            
+            # Get distinct review dates
+            query = f"""
+                SELECT DISTINCT DATE(id / 1000, 'unixepoch', 'localtime') as review_date
+                FROM revlog
+                WHERE cid IN ({placeholders})
+            """
+            chunk_dates = mw.col.db.list(query, *chunk)
+            review_dates.update(chunk_dates)
         
         if not review_dates:
             return 0
+        
+        # Sort dates descending
+        sorted_dates = sorted(list(review_dates), reverse=True)
+        review_dates = sorted_dates
         
         # Parse dates
         parsed_dates = []
@@ -266,50 +281,77 @@ def get_review_stats_for_deck(deck_id: int, days: int = 30) -> dict:
             return {}
         
         # Use parameterized query with placeholders (prevent SQL injection)
-        placeholders = ",".join("?" * len(valid_card_ids))
+        # Chunk the IDs to avoid SQLite limit (999 variables)
+        total_reviews = 0
+        new_cards = 0
+        study_time_minutes = 0.0
+        last_review_id = 0
+        today_reviews = 0
+        total_ease_sum = 0
+        count_with_ease = 0
+        chunk_size = 999
         
-        # Query review log with parameterized values
-        query = f"""
-            SELECT 
-                COUNT(*) as total_reviews,
-                SUM(CASE WHEN type = 0 THEN 1 ELSE 0 END) as new_cards,
-                AVG(ease) as average_ease,
-                SUM(time) / 60000 as study_time_minutes,
-                MAX(id) as last_review_id
-            FROM revlog
-            WHERE cid IN ({placeholders})
-            AND id >= ?
-        """
+        for i in range(0, len(valid_card_ids), chunk_size):
+            chunk = valid_card_ids[i:i + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            
+            # Query review log with parameterized values
+            query = f"""
+                SELECT 
+                    COUNT(*) as total_reviews,
+                    SUM(CASE WHEN type = 0 THEN 1 ELSE 0 END) as new_cards,
+                    SUM(time) / 60000.0 as study_time_minutes,
+                    MAX(id) as last_review_id,
+                    SUM(ease) as ease_sum,
+                    COUNT(ease) as ease_count
+                FROM revlog
+                WHERE cid IN ({placeholders})
+                AND id >= ?
+            """
+            res = mw.col.db.first(query, *chunk, cutoff_time)
+            if res:
+                total_reviews += res[0] or 0
+                new_cards += res[1] or 0
+                study_time_minutes += res[2] or 0.0
+                if res[3] and res[3] > last_review_id:
+                    last_review_id = res[3]
+                total_ease_sum += res[4] or 0
+                count_with_ease += res[5] or 0
+            
+            # Query for today's reviews
+            today_query = f"""
+                SELECT COUNT(*) as today_reviews
+                FROM revlog
+                WHERE cid IN ({placeholders})
+                AND id >= ?
+            """
+            today_res = mw.col.db.first(today_query, *chunk, today_cutoff)
+            if today_res:
+                today_reviews += today_res[0] or 0
         
-        result = mw.col.db.first(query, *valid_card_ids, cutoff_time)
-        
-        # Query for today's reviews
-        today_query = f"""
-            SELECT COUNT(*) as today_reviews
-            FROM revlog
-            WHERE cid IN ({placeholders})
-            AND id >= ?
-        """
-        today_result = mw.col.db.first(today_query, *valid_card_ids, today_cutoff)
-        
-        if not result:
+        if total_reviews == 0 and today_reviews == 0:
             return {}
+        
+        # Calculate average ease
+        average_ease = 0
+        if count_with_ease > 0:
+            average_ease = round(total_ease_sum / count_with_ease, 2)
         
         # Parse last study date
         last_study_date = None
-        if result[4]:
+        if last_review_id > 0:
             try:
-                last_study_date = datetime.fromtimestamp(result[4] / 1000).isoformat()
+                last_study_date = datetime.fromtimestamp(last_review_id / 1000).isoformat()
             except (ValueError, OSError) as e:
-                logger.warning(f"Error converting timestamp {result[4]}: {e}")
+                logger.warning(f"Error converting timestamp {last_review_id}: {e}")
         
         return {
-            'total_reviews': result[0] or 0,
-            'new_cards': result[1] or 0,
-            'average_ease': round(result[2] or 0, 2),
-            'study_time_minutes': round(result[3] or 0, 2),
+            'total_reviews': total_reviews,
+            'new_cards': new_cards,
+            'average_ease': average_ease,
+            'study_time_minutes': round(study_time_minutes, 2),
             'last_study_date': last_study_date,
-            'total_reviews_today': today_result[0] if today_result else 0
+            'total_reviews_today': today_reviews
         }
         
     except Exception as e:
