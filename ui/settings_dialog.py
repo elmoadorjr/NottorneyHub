@@ -1048,11 +1048,31 @@ class SettingsDialog(QDialog):
         self.admin_log(f"🔄 Collecting cards from deck...")
         
         try:
-            # Get all notes from this deck (use parameterized-like search escaping)
+            # FIXED: Use parameterized query instead of string formatting
+            # Get all notes from this deck using card IDs (safer approach)
             deck_name = mw.col.decks.get(anki_deck_id)['name']
-            # Robust escaping for deck name
-            query = f'"deck:{deck_name}"'
-            note_ids = mw.col.find_notes(query)
+            
+            # Get all card IDs for this deck
+            card_ids = mw.col.decks.cids(anki_deck_id, children=True)
+            
+            if not card_ids:
+                self.admin_log(f"❌ No cards found in deck")
+                QMessageBox.warning(self, "No Cards", "No cards found in the selected deck.")
+                return
+            
+            # Get unique note IDs from cards using parameterized query
+            # Chunk card IDs to avoid SQLite's 999 parameter limit
+            note_ids = set()
+            chunk_size = 999
+            
+            for i in range(0, len(card_ids), chunk_size):
+                chunk = card_ids[i:i + chunk_size]
+                placeholders = ",".join("?" * len(chunk))
+                query = f"SELECT DISTINCT nid FROM cards WHERE id IN ({placeholders})"
+                chunk_note_ids = mw.col.db.list(query, *chunk)
+                note_ids.update(chunk_note_ids)
+            
+            note_ids = list(note_ids)
             
             changes = []
             for nid in note_ids:
@@ -1219,10 +1239,29 @@ class SettingsDialog(QDialog):
         self.admin_log(f"🔄 Collecting all cards from deck...")
         
         try:
-            # Get all notes from this deck (escape special chars like parentheses in deck names)
+            # FIXED: Use same approach as admin_push_changes
             deck_name = mw.col.decks.get(anki_deck_id)['name']
-            escaped_deck_name = escape_anki_search(deck_name)
-            note_ids = mw.col.find_notes(f'"deck:{escaped_deck_name}"')
+            
+            # Get all card IDs for this deck
+            card_ids = mw.col.decks.cids(anki_deck_id, children=True)
+            
+            if not card_ids:
+                self.admin_log(f"❌ No cards found in deck")
+                QMessageBox.warning(self, "No Cards", "No cards found in the selected deck.")
+                return
+            
+            # Get unique note IDs from cards using parameterized query
+            note_ids = set()
+            chunk_size = 999
+            
+            for i in range(0, len(card_ids), chunk_size):
+                chunk = card_ids[i:i + chunk_size]
+                placeholders = ",".join("?" * len(chunk))
+                query = f"SELECT DISTINCT nid FROM cards WHERE id IN ({placeholders})"
+                chunk_note_ids = mw.col.db.list(query, *chunk)
+                note_ids.update(chunk_note_ids)
+            
+            note_ids = list(note_ids)
             
             cards = []
             for nid in note_ids:
@@ -1243,7 +1282,7 @@ class SettingsDialog(QDialog):
                     "note_type": note.note_type()['name'],
                     "fields": fields,
                     "tags": note.tags,
-                    "deck_path": deck_path  # e.g., "AnkiPH::Political Law::Constitutional Law I"
+                    "deck_path": deck_path
                 })
             
             self.admin_log(f"📦 Found {len(cards)} cards to import")
