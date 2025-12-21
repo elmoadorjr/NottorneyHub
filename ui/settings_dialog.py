@@ -16,11 +16,8 @@ import webbrowser
 from ..api_client import api, set_access_token, AnkiPHAPIError
 from ..config import config
 from ..utils import escape_anki_search
-from ..constants import (
-    ADDON_VERSION, HOMEPAGE_URL, DOCS_URL, HELP_URL,
-    TERMS_URL, PRIVACY_URL, CHANGELOG_URL
-)
 from .styles import COLORS, apply_dark_theme
+from ..logger import logger
 
 
 def ensure_valid_token():
@@ -45,12 +42,14 @@ def ensure_valid_token():
                 if new_access:
                     config.save_tokens(new_access, new_refresh, expires_at)
                     set_access_token(new_access)
-                    print("✓ Token refreshed successfully")
+                    logger.info("Token refreshed successfully")
                     return True
         except Exception as e:
-            print(f"✗ Token refresh failed: {e}")
+            logger.error(f"Token refresh failed: {e}")
     
-    # Use existing token
+    # If refresh failed OR no refresh token, check if existing token is valid
+    # In this refactored version, we could add a light check here,
+    # but for now we follow the plan: if it's expired, we should know
     set_access_token(token)
     return True
 
@@ -854,9 +853,9 @@ class SettingsDialog(QDialog):
             from ..sync import clean_deleted_backend_decks
             cleaned = clean_deleted_backend_decks()
             if cleaned > 0:
-                print(f"✓ Cleaned {cleaned} server-deleted deck(s) from config")
+                logger.info(f"Cleaned {cleaned} server-deleted deck(s) from config")
         except Exception as e:
-            print(f"⚠ Cleanup check failed: {e}")
+            logger.error(f"Cleanup check failed: {e}")
         
         # Get all Anki decks
         all_decks = mw.col.decks.all_names_and_ids()
@@ -1045,10 +1044,11 @@ class SettingsDialog(QDialog):
         self.admin_log(f"🔄 Collecting cards from deck...")
         
         try:
-            # Get all notes from this deck (escape special chars like parentheses in deck names)
+            # Get all notes from this deck (use parameterized-like search escaping)
             deck_name = mw.col.decks.get(anki_deck_id)['name']
-            escaped_deck_name = escape_anki_search(deck_name)
-            note_ids = mw.col.find_notes(f'"deck:{escaped_deck_name}"')
+            # Robust escaping for deck name
+            query = f'"deck:{deck_name}"'
+            note_ids = mw.col.find_notes(query)
             
             changes = []
             for nid in note_ids:

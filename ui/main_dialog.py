@@ -18,8 +18,8 @@ from ..config import config
 from ..deck_importer import import_deck
 from ..utils import escape_anki_search
 from ..update_checker import update_checker
-from ..constants import HOMEPAGE_URL, TERMS_URL, PRIVACY_URL, PLANS_URL, COMMUNITY_URL
 from .styles import COLORS, apply_dark_theme
+from ..logger import logger
 
 
 class DeckManagementDialog(QDialog):
@@ -496,15 +496,14 @@ class DeckManagementDialog(QDialog):
                 is_installed = False
                 
                 if anki_deck_id and mw.col:
-                    # Use proper deck_exists check
                     is_installed = deck_exists(anki_deck_id)
                     if is_installed and not server_title:
-                        # Only use Anki name if no server title
                         try:
+                            # Use integer ID for deck lookup
                             deck = mw.col.decks.get(int(anki_deck_id))
                             if deck and deck['name'] != 'Default':
                                 deck_name = deck['name']
-                        except:
+                        except Exception:
                             pass
                 
                 # Show install status in list (only show ⚠ for not installed)
@@ -519,7 +518,7 @@ class DeckManagementDialog(QDialog):
                 self.deck_list.addItem(item)
         
         except Exception as e:
-            print(f"Error loading decks: {e}")
+            logger.exception(f"Error loading decks: {e}")
     
     def _sync_subscriptions_from_server(self):
         """Sync subscriptions from server to local config"""
@@ -550,16 +549,16 @@ class DeckManagementDialog(QDialog):
                             title=deck.get('title'),
                             card_count=deck.get('card_count')
                         )
-                        print(f"✓ Synced subscription: {deck.get('title')}")
+                        logger.info(f"Synced subscription: {deck.get('title')}")
                 
                 # Remove local entries not on server anymore
                 for deck_id in list(local_decks.keys()):
                     if deck_id not in server_deck_ids:
                         config.remove_downloaded_deck(deck_id)
-                        print(f"✓ Removed unsubscribed deck: {deck_id}")
+                        logger.info(f"Removed unsubscribed deck: {deck_id}")
         
         except Exception as e:
-            print(f"⚠ Subscription sync failed (non-critical): {e}")
+            logger.warning(f"Subscription sync failed (non-critical): {e}")
     
     def on_deck_selected(self, item):
         """Handle deck selection - show details in right panel"""
@@ -669,7 +668,7 @@ class DeckManagementDialog(QDialog):
             # Legacy flow: download .apkg file
             if result.get('download_url'):
                 download_url = result['download_url']
-                print(f"✓ Got download URL: {download_url[:80]}...")
+                logger.info(f"Got download URL: {download_url[:80]}...")
                 
                 self.sync_btn.setText("Importing...")
                 QApplication.processEvents()
@@ -693,7 +692,7 @@ class DeckManagementDialog(QDialog):
             raise Exception("No download method available (missing use_pull_changes and download_url)")
         
         except Exception as e:
-            print(f"✗ Install error: {e}")
+            logger.error(f"Install error: {e}")
             QMessageBox.critical(self, "Error", f"Install failed: {e}")
         finally:
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -714,7 +713,7 @@ class DeckManagementDialog(QDialog):
             
             # Use paginated pull to get ALL cards
             changes_result = api.pull_all_cards(deck_id, progress_callback=update_progress)
-            print(f"✓ pull_all_cards response: success={changes_result.get('success')}, cards={len(changes_result.get('cards', []))}")
+            logger.info(f"pull_all_cards response: success={changes_result.get('success')}, cards={len(changes_result.get('cards', []))}")
             
             if not changes_result.get('success'):
                 raise Exception(changes_result.get('error', 'Failed to fetch cards'))
@@ -752,7 +751,7 @@ class DeckManagementDialog(QDialog):
                 raise Exception("Failed to build deck in Anki")
         
         except Exception as e:
-            print(f"✗ Pull changes install error: {e}")
+            logger.exception(f"Pull changes install error: {e}")
             raise
     
     def _build_deck_from_json(self, deck_id, deck_info, cards, note_types):
@@ -775,7 +774,7 @@ class DeckManagementDialog(QDialog):
         # Don't pre-create deck - let _add_card_to_deck create it when adding cards
         # This prevents empty duplicate decks
         did = None
-        print(f"✓ Will create deck: {deck_name}")
+        logger.info(f"Will create deck: {deck_name}")
         
         # Create note types first
         for nt in note_types:

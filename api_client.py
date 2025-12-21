@@ -12,7 +12,10 @@ from typing import Any, Dict, Optional, List
 from enum import Enum
 from datetime import datetime
 import webbrowser
+import time
+import random
 
+from .logger import logger
 try:
     from .constants import COLLECTION_URL, PREMIUM_URL
 except ImportError:
@@ -140,7 +143,7 @@ def show_upgrade_prompt():
         if clicked == subscribe_btn:
             webbrowser.open(PREMIUM_URL)
     except Exception as e:
-        print(f"\u2717 Failed to show upgrade prompt: {e}")
+        logger.error(f"Failed to show upgrade prompt: {e}")
 
 
 class AnkiPHAPIError(Exception):
@@ -179,15 +182,43 @@ class ApiClient:
         return f"{self.base_url}/{path}"
 
     def post(self, path: str, json_body: Optional[Dict[str, Any]] = None, 
-             require_auth: bool = True, timeout: int = 30) -> Any:
-        """Make POST request to API"""
+             require_auth: bool = True, timeout: int = 30, max_retries: int = 3) -> Any:
+        """Make POST request to API with exponential backoff"""
         url = self._full_url(path)
         headers = self._headers(include_auth=require_auth)
 
-        if _HAS_REQUESTS:
-            return self._post_with_requests(url, headers, json_body, timeout)
-        else:
-            return self._post_with_urllib(url, headers, json_body, timeout)
+        retries = 0
+        while retries <= max_retries:
+            try:
+                if _HAS_REQUESTS:
+                    return self._post_with_requests(url, headers, json_body, timeout)
+                else:
+                    return self._post_with_urllib(url, headers, json_body, timeout)
+            except AnkiPHRateLimitError as e:
+                if retries == max_retries:
+                    raise
+                
+                wait_time = e.retry_after
+                logger.warning(f"Rate limited. Waiting {wait_time}s before retry {retries+1}/{max_retries}")
+                time.sleep(wait_time)
+                retries += 1
+            except AnkiPHAPIError as e:
+                # Retry on 5xx errors
+                if e.status_code and 500 <= e.status_code < 600 and retries < max_retries:
+                    wait_time = (2 ** retries) + random.random()
+                    logger.warning(f"Server error {e.status_code}. Retrying in {wait_time:.1f}s...")
+                    time.sleep(wait_time)
+                    retries += 1
+                else:
+                    raise
+            except Exception as e:
+                if retries < max_retries:
+                    wait_time = (2 ** retries) + random.random()
+                    logger.warning(f"Unexpected error: {e}. Retrying in {wait_time:.1f}s...")
+                    time.sleep(wait_time)
+                    retries += 1
+                else:
+                    raise
 
     def _post_with_requests(self, url: str, headers: Dict[str, str], 
                            json_body: Optional[Dict[str, Any]], timeout: int) -> Any:
@@ -439,7 +470,7 @@ class ApiClient:
             print(f"✗ Invalid download_url received: {preview}")
             raise AnkiPHAPIError(f"Invalid download URL format. Expected http/https URL, got: {preview[:50]}...")
         
-        print(f"✓ Downloading from: {download_url[:80]}...")
+        logger.info(f"Downloading from: {download_url[:80]}...")
 
         if not _HAS_REQUESTS: 
             # Use urllib to fetch bytes
@@ -480,7 +511,7 @@ class ApiClient:
                           "application/x-zip-compressed", "binary/octet-stream")
             
             if content_type and not any(v in content_type for v in valid_types):
-                print(f"⚠ Warning: unexpected content-type: {content_type}")
+                logger.warning(f"unexpected content-type: {content_type}")
 
             # Download content
             content = bytearray()
@@ -494,7 +525,7 @@ class ApiClient:
             # Quick ZIP signature check (PK magic bytes)
             if len(content) >= 4:
                 if content[:2] != b"PK":
-                    print("⚠ Warning: downloaded file does not appear to be a ZIP file")
+                    logger.warning("downloaded file does not appear to be a ZIP file")
 
             return bytes(content)
             
@@ -799,7 +830,7 @@ class ApiClient:
             if progress_callback:
                 progress_callback(len(all_cards), total_cards)
             
-            print(f"✓ Fetched batch: offset={offset}, got {len(cards)} cards (total: {len(all_cards)}/{total_cards})")
+            logger.info(f"Fetched batch: offset={offset}, got {len(cards)} cards (total: {len(all_cards)}/{total_cards})")
             
             # Check if more cards to fetch
             has_more = result.get('has_more', False)

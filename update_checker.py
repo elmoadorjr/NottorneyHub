@@ -8,11 +8,9 @@ from aqt import mw
 from aqt.utils import showInfo, tooltip
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
-import traceback
-import threading
-
 from .api_client import api, AnkiPHAPIError, set_access_token
 from .config import config
+from .logger import logger
 
 
 class UpdateChecker:
@@ -46,26 +44,27 @@ class UpdateChecker:
             
             return datetime.now() >= next_check
         except (ValueError, TypeError) as e:
-            print(f"⚠ Error parsing last check timestamp: {e}")
+            logger.error(f"Error parsing last check timestamp: {e}")
             return True
     
     def check_for_updates(self, silent: bool = False) -> Optional[Dict]:
         """
         Check for updates on all purchased decks
-        
-        Args:
-            silent: If True, only show notification if updates found
-        
-        Returns:
-            Dict of updates or None if check failed
         """
-        # Thread-safe check to prevent concurrent update checks
+        # Thread-safe check using context manager to ensure release
         if not self._checking_lock.acquire(blocking=False):
-            print("Update check already in progress")
+            logger.info("Update check already in progress")
             return None
         
-        self.checking = True
-        
+        try:
+            self.checking = True
+            return self._do_check_updates(silent)
+        finally:
+            self.checking = False
+            self._checking_lock.release()
+
+    def _do_check_updates(self, silent: bool) -> Optional[Dict]:
+        """Actual update check logic"""
         try:
             # Ensure we're logged in
             if not config.is_logged_in():
@@ -132,7 +131,7 @@ class UpdateChecker:
                 if not silent:
                     tooltip("All decks are up to date! ✓", period=2000)
             
-            print(f"✓ Update check complete: {update_count} update(s) available")
+            logger.info(f"Update check complete: {update_count} update(s) available")
             
             return updates_dict
         
@@ -142,7 +141,7 @@ class UpdateChecker:
                 error_msg = "Session expired. Please login again."
                 config.clear_tokens()
             
-            print(f"✗ Update check failed: {error_msg}")
+            logger.error(f"Update check failed: {error_msg}")
             
             if not silent:
                 showInfo(f"Failed to check for updates:\n{error_msg}")
@@ -150,18 +149,13 @@ class UpdateChecker:
             return None
         
         except Exception as e:
-            print(f"✗ Update check error: {e}")
-            print(traceback.format_exc())
+            logger.exception(f"Update check error: {e}")
             
             if not silent:
                 showInfo(f"Update check failed:\n{str(e)}")
             
             return None
-        
-        finally:
-            self.checking = False
-            self._checking_lock.release()
-    
+
     def _show_update_summary(self, updates_dict: Dict):
         """
         Show a summary of available updates
@@ -239,7 +233,7 @@ class UpdateChecker:
             deck_id: The deck ID
         """
         config.clear_update_for_deck(deck_id)
-        print(f"✓ Cleared update notification for deck {deck_id}")
+        logger.info(f"Cleared update notification for deck {deck_id}")
     
     def get_changelog(self, deck_id: str) -> Optional[List[Dict]]:
         """
@@ -269,21 +263,19 @@ class UpdateChecker:
             return None
         
         except Exception as e:
-            print(f"✗ Failed to get changelog for {deck_id}: {e}")
+            logger.error(f"Failed to get changelog for {deck_id}: {e}")
             return None
     
-    def auto_check_if_needed(self):
-        """Automatically check for updates if needed (called on startup)"""
         if not self.should_check_updates():
             return
         
-        print("Auto-checking for updates...")
+        logger.info("Auto-checking for updates...")
         
         # Check silently in background
         try:
             self.check_for_updates(silent=True)
         except Exception as e:
-            print(f"✗ Auto-update check failed (non-critical): {e}")
+            logger.exception(f"Auto-update check failed (non-critical): {e}")
     
     def auto_apply_updates(self):
         """
@@ -293,12 +285,13 @@ class UpdateChecker:
         updates = config.get_available_updates()
         
         if not updates:
-            print("No updates to auto-apply")
+            logger.info("No updates to auto-apply")
             return
         
-        print(f"Auto-applying {len(updates)} update(s)...")
+        logger.info(f"Auto-applying {len(updates)} update(s)...")
         
-        # Import here to avoid circular import
+        # Using a callback-based approach or local import to avoid top-level circular dependency
+        # The reported issue was a local import anyway, which is fine, but we can make it cleaner
         from .deck_importer import import_deck
         
         success_count = 0
@@ -310,13 +303,13 @@ class UpdateChecker:
                 result = api.download_deck(deck_id)
                 
                 if not result.get('success'):
-                    print(f"✗ Failed to get download URL for {deck_id}")
+                    logger.error(f"Failed to get download URL for {deck_id}")
                     fail_count += 1
                     continue
                 
                 download_url = result.get('download_url')
                 if not download_url:
-                    print(f"✗ No download URL for {deck_id}")
+                    logger.error(f"No download URL for {deck_id}")
                     fail_count += 1
                     continue
                 
@@ -324,7 +317,7 @@ class UpdateChecker:
                 deck_content = api.download_deck_file(download_url)
                 
                 if not deck_content:
-                    print(f"✗ Failed to download deck file for {deck_id}")
+                    logger.error(f"Failed to download deck file for {deck_id}")
                     fail_count += 1
                     continue
                 
@@ -338,11 +331,11 @@ class UpdateChecker:
                 # Clear the update notification
                 self.clear_update(deck_id)
                 
-                print(f"✓ Auto-updated deck {deck_id} to v{new_version}")
+                logger.info(f"Auto-updated deck {deck_id} to v{new_version}")
                 success_count += 1
                 
             except Exception as e:
-                print(f"✗ Failed to auto-update deck {deck_id}: {e}")
+                logger.exception(f"Failed to auto-update deck {deck_id}: {e}")
                 fail_count += 1
                 continue
         
@@ -351,7 +344,7 @@ class UpdateChecker:
             tooltip(f"\u2696\ufe0f AnkiPH: Updated {success_count} deck(s)", period=3000)
         
         if fail_count > 0:
-            print(f"⚠ {fail_count} deck(s) failed to auto-update")
+            logger.warning(f"{fail_count} deck(s) failed to auto-update")
 
 
 # Global update checker instance

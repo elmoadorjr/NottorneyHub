@@ -4,8 +4,6 @@ Version: 4.0.0
 """
 
 from aqt.qt import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QListWidget, QListWidgetItem, QFrame, Qt, QProgressBar,
     pyqtSignal
 )
 

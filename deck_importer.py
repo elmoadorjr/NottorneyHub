@@ -8,10 +8,8 @@ Version: 2.1.0
 
 import tempfile
 import os
-from pathlib import Path
-from aqt import mw
-from aqt.operations import QueryOp
 from anki.collection import ImportAnkiPackageRequest
+from .logger import logger
 
 
 def import_deck(deck_content: bytes, deck_name: str) -> int:
@@ -141,9 +139,9 @@ def import_deck(deck_content: bytes, deck_name: str) -> int:
         try:
             if os.path.exists(temp_file_path):
                 os.unlink(temp_file_path)
-                print(f"✓ Cleaned up temp file")
+                logger.info(f"Cleaned up temp file")
         except Exception as e:
-            print(f"⚠ Failed to clean up temp file: {e}")
+            logger.error(f"Failed to clean up temp file: {e}")
 
 
 def import_deck_with_progress(deck_content: bytes, deck_name: str, 
