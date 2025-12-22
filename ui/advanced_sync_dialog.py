@@ -1,7 +1,7 @@
 """
 Advanced Sync Dialog for AnkiPH Addon
 Features: Tag sync, Suspend state sync, Media sync, Note type sync
-Version: 2.1.0
+Version: 4.0.0 - Refactored with shared styles
 """
 
 from aqt.qt import (
@@ -14,6 +14,7 @@ from aqt import mw
 
 from ..api_client import api, set_access_token, AnkiPHAPIError
 from ..config import config
+from .styles import COLORS, apply_dark_theme
 
 
 class AdvancedSyncDialog(QDialog):
@@ -25,9 +26,10 @@ class AdvancedSyncDialog(QDialog):
         self.deck_name = deck_name or f"Deck {deck_id[:8]}"
         self.sync_in_progress = False
         
-        self.setWindowTitle(f"⚡ Advanced Sync - {self.deck_name}")
+        self.setWindowTitle(f"Advanced Sync - {self.deck_name}")
         self.setMinimumSize(600, 500)
         self.setup_ui()
+        apply_dark_theme(self)
     
     def setup_ui(self):
         """Setup main UI"""

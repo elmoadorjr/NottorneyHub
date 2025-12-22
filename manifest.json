@@ -1,11 +1,11 @@
 {
   "package": "AnkiPH_Addon",
-  "name": "AnkiPH",
-  "version": "3.1.0",
+  "name": "AnkiPH - Philippine Bar Exam Deck Sync",
+  "version": "4.0.0",
   "author": "AnkiPH Team",
-  "homepage": "https://nottorney.lovable.app",
+  "homepage": "https://ankiph.lovable.app",
   "conflicts": [],
-  "mod": 0,
+  "mod": 1735027200,
   "min_point_version": 50,
   "max_point_version": 0
 }

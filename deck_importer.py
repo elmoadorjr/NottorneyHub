@@ -1,315 +1,381 @@
 """
-Deck importer for the AnkiPH addon - FIXED VERSION
-Handles importing .apkg files into Anki
-FIXED: Properly handles DeckNameId objects and PyQt6 compatibility
-ENHANCED: Added parent parameter to prevent orphaned operations
-Version: 2.1.0
+Deck importer for the AnkiPH addon
+Handles importing deck data directly from JSON into Anki (Database-Only Sync)
+Version: 4.0.0 - Fixed GUID search and error handling
 """
 
-import tempfile
 import os
-from pathlib import Path
+from typing import Dict, List, Optional, Any
+
+# HTTP Library Detection (matches api_client.py)
+try:
+    import requests
+    _HAS_REQUESTS = True
+except ImportError:
+    import urllib.request as _urllib_request
+    _HAS_REQUESTS = False
 from aqt import mw
 from aqt.operations import QueryOp
-from anki.collection import ImportAnkiPackageRequest
+from aqt.utils import showInfo
+from anki.notes import Note
+from .logger import logger
+from .utils import escape_anki_search
 
-
-def import_deck(deck_content: bytes, deck_name: str) -> int:
+def import_deck_from_json(deck_data: Dict, deck_name: str) -> int:
     """
-    Import a deck into Anki from .apkg file content
+    Import a deck into Anki from a JSON dictionary (v3.0+ format)
     
     Args:
-        deck_content: The .apkg file content as bytes
-        deck_name: Name of the deck (used for reference only)
+        deck_data: The deck data dictionary containing 'deck', 'cards', 'note_types', 'media_files'
+        deck_name: Name of the deck
     
     Returns:
-        The Anki deck ID of the imported deck (as integer)
-    
-    Raises:
-        Exception: If import fails
+        The Anki deck ID of the imported/updated deck
     """
-    if not deck_content or len(deck_content) == 0:
-        raise Exception("Deck content is empty")
-    
-    # Create a temporary file to store the .apkg
-    with tempfile.NamedTemporaryFile(suffix='.apkg', delete=False) as temp_file:
-        temp_file.write(deck_content)
-        temp_file_path = temp_file.name
-    
+    if not deck_data:
+        raise Exception("Deck data is empty")
+        
     try:
-        print(f"Importing deck: {deck_name}")
-        print(f"Temp file: {temp_file_path} ({len(deck_content)} bytes)")
+        import traceback
+        stack = "".join(traceback.format_stack())
+        logger.info(f"DEBUG: import_deck_from_json CALLED FOR: {deck_name}\nTRACEBACK:\n{stack}")
         
-        # Store existing deck IDs to find the new one
-        # FIXED: Extract integer IDs from DeckNameId objects
-        existing_deck_ids = set()
-        for deck_info in mw.col.decks.all_names_and_ids():
-            # deck_info.id is the integer ID we need
-            existing_deck_ids.add(deck_info.id)
+        # 1. Sync Note Types
+        note_types = deck_data.get('note_types', [])
+        _sync_note_types(note_types)
         
-        print(f"Existing deck IDs before import: {len(existing_deck_ids)} decks")
+        # 2. Get/Create Deck
+        # Use the name from the JSON if available, otherwise fallback to arg
+        api_deck = deck_data.get('deck', {})
+        target_deck_name = api_deck.get('title') or deck_name
         
-        # Use the modern import method for Anki 2.1.55+
-        request = ImportAnkiPackageRequest(
-            package_path=temp_file_path
-        )
+        # Ensure deck exists
+        deck_id = mw.col.decks.id(target_deck_name)
+        # Select it (optional, but good for UI)
+        mw.col.decks.select(deck_id)
         
-        # Import the deck
-        result = mw.col.import_anki_package(request)
-        print(f"Import result: {result}")
+        # Update deck configuration if needed (optional)
+        # This is where we could set deck options if provided in JSON
         
-        # Find the newly imported deck(s)
-        # FIXED: Extract integer IDs from DeckNameId objects
-        new_deck_ids = set()
-        all_decks_after = []
+        # 3. Sync Media
+        media_files = deck_data.get('media_files', []) # List of {filename, url} or Dict
+        _sync_media_files(media_files)
         
-        for deck_info in mw.col.decks.all_names_and_ids():
-            deck_id = deck_info.id  # Extract integer ID
-            deck_name_actual = deck_info.name
-            all_decks_after.append((deck_id, deck_name_actual))
+        # 4. Sync Cards/Notes
+        cards = deck_data.get('cards', [])
+        if not cards:
+            logger.warning("No cards found in deck data")
+            return int(deck_id)
             
-            if deck_id not in existing_deck_ids:
-                new_deck_ids.add(deck_id)
+        logger.info(f"Syncing {len(cards)} cards...")
         
-        print(f"Total decks after import: {len(all_decks_after)}")
-        print(f"New deck IDs detected: {new_deck_ids}")
+        new_cnt = 0
+        upd_cnt = 0
         
-        # Determine which deck was imported
-        deck_id = None
-        
-        if new_deck_ids:
-            # Use the first new deck ID (usually there's only one)
-            deck_id = list(new_deck_ids)[0]
-            
-            # Get the deck name
-            deck = mw.col.decks.get(deck_id)
-            actual_deck_name = deck['name']
-            
-            print(f"✓ Imported new deck: '{actual_deck_name}' (ID: {deck_id})")
-            
-            # Note if name differs
-            if actual_deck_name != deck_name:
-                print(f"  Note: Deck imported as '{actual_deck_name}', not '{deck_name}'")
-        else:
-            # Fallback: Try to find by name if no new decks detected
-            # This can happen if the deck was already present and got merged
-            print(f"⚠ No new deck detected, searching for existing deck by name...")
-            
-            # Search for deck by the name that might be in the package
-            matching_deck = None
-            for deck_info in mw.col.decks.all_names_and_ids():
-                if deck_name.lower() in deck_info.name.lower():
-                    matching_deck = deck_info
-                    break
-            
-            if matching_deck:
-                deck_id = matching_deck.id
-                print(f"✓ Found existing deck: '{matching_deck.name}' (ID: {deck_id})")
+        for card_data in cards:
+            if _process_card(card_data, deck_id):
+                new_cnt += 1
             else:
-                # Last resort: get the most recently modified deck
-                print(f"⚠ Searching for most recently modified deck...")
-                all_deck_dicts = []
-                for deck_info in mw.col.decks.all_names_and_ids():
-                    deck_dict = mw.col.decks.get(deck_info.id)
-                    if deck_dict:
-                        all_deck_dicts.append(deck_dict)
+                upd_cnt += 1
                 
-                if all_deck_dicts:
-                    most_recent = max(all_deck_dicts, key=lambda d: d.get('mod', 0))
-                    deck_id = most_recent['id']
-                    print(f"⚠ Using most recent deck: '{most_recent['name']}' (ID: {deck_id})")
-                else:
-                    raise Exception("Could not determine imported deck ID")
+        logger.info(f"Import complete: {new_cnt} new notes, {upd_cnt} updated notes")
         
-        if not deck_id:
-            raise Exception("Failed to find imported deck")
-        
-        # Refresh the main window to show the new deck
+        # Reset UI
         mw.reset()
         
-        print(f"✓ Import complete: deck ID = {deck_id}")
-        
-        # CRITICAL: Return integer ID, not DeckNameId object
         return int(deck_id)
-    
+        
     except Exception as e:
-        print(f"✗ Import failed: {e}")
+        logger.exception(f"Import failed: {e}")
         raise
+
+def _sync_note_types(note_types: List[Dict]):
+    """Ensure note types exist and match the definition"""
+    for nt_data in note_types:
+        name = nt_data.get('name')
+        if not name:
+            continue
+            
+        model = mw.col.models.by_name(name)
+        
+        # If model doesn't exist, create it
+        if not model:
+            logger.info(f"Creating new note type: {name}")
+            model = mw.col.models.new(name)
+            
+            # Fields
+            for field in nt_data.get('fields', []):
+                # Fields in v3 might be objects or strings
+                field_name = field.get('name') if isinstance(field, dict) else field
+                mw.col.models.add_field(model, mw.col.models.new_field(field_name))
+                
+            # Templates
+            for tmpl in nt_data.get('templates', []):
+                t = mw.col.models.new_template(tmpl.get('name', 'Card 1'))
+                t['qfmt'] = tmpl.get('qfmt', '')
+                t['afmt'] = tmpl.get('afmt', '')
+                mw.col.models.add_template(model, t)
+                
+            # CSS
+            if 'css' in nt_data:
+                model['css'] = nt_data['css']
+                
+            mw.col.models.add(model)
+            mw.col.models.save(model)
+        
+        # Note: Full model updating logic (handling schema changes) is complex.
+        # For now, we assume if it exists, it's compatible, or we might miss field updates.
+        # Future improvement: Compare fields and add missing ones.
+
+def _sync_media_files(media_files: Any):
+    """Download missing media files"""
+    from .constants import DOWNLOAD_TIMEOUT_SECONDS
     
-    finally:
-        # Clean up the temporary file
+    # Handle list of dicts or dict of filename:url
+    if isinstance(media_files, dict):
+        items = media_files.items()
+    else:
+        # Assuming list of dicts like [{'filename': 'x.jpg', 'url': '...'}]
+        items = []
+        for m in media_files:
+            if isinstance(m, dict) and 'filename' in m and 'url' in m:
+                items.append((m['filename'], m['url']))
+                
+    for filename, url in items:
+        # Check if exists
+        if os.path.exists(os.path.join(mw.col.media.dir(), filename)):
+            continue
+            
         try:
-            if os.path.exists(temp_file_path):
-                os.unlink(temp_file_path)
-                print(f"✓ Cleaned up temp file")
+            # Download
+            logger.debug(f"Downloading media: {filename}")
+            if hasattr(url, 'startswith') and url.startswith('http'):
+                if _HAS_REQUESTS:
+                    r = requests.get(url, timeout=DOWNLOAD_TIMEOUT_SECONDS)
+                    if r.status_code == 200:
+                        mw.col.media.write_data(filename, r.content)
+                else:
+                    # Fallback to urllib
+                    with _urllib_request.urlopen(url, timeout=DOWNLOAD_TIMEOUT_SECONDS) as resp:
+                        mw.col.media.write_data(filename, resp.read())
         except Exception as e:
-            print(f"⚠ Failed to clean up temp file: {e}")
+            logger.warning(f"Failed to download media {filename}: {e}")
+
+def _process_card(card_data: Dict, deck_id: int) -> bool:
+    """
+    Create or update a note from card data.
+    Returns True if new note created, False if updated.
+    
+    Assumes card_data has:
+    - guid (str)
+    - note_type (str)
+    - fields (Dict[str, str] or List[str])
+    - tags (List[str], optional)
+    """
+    guid = card_data.get('guid')
+    if not guid:
+        logger.warning("Card data missing GUID, skipping")
+        return False
+    
+    # FIXED: Escape GUID for safe Anki search and check for results before accessing
+    escaped_guid = escape_anki_search(guid)
+    note_ids = mw.col.find_notes(f'guid:"{escaped_guid}"')
+    
+    existing_note = None
+    if note_ids:
+        try:
+            existing_note = mw.col.get_note(note_ids[0])
+        except Exception as e:
+            logger.error(f"Failed to get existing note {note_ids[0]}: {e}")
+            return False
+    
+    if existing_note:
+        # Update existing
+        _update_note(existing_note, card_data, deck_id)
+        return False
+    else:
+        # Create new
+        return _create_note(card_data, deck_id)
+
+def _create_note(card_data: Dict, deck_id: int) -> bool:
+    model_name = card_data.get('note_type')
+    model = mw.col.models.by_name(model_name)
+    if not model:
+        logger.error(f"Model {model_name} not found for card {card_data.get('guid')}")
+        return False
+        
+    note = mw.col.new_note(model)
+    note.guid = card_data.get('guid')
+    
+    _fill_note_fields(note, card_data.get('fields', {}))
+    
+    # Tags
+    tags = card_data.get('tags', [])
+    if tags:
+        note.tags = tags
+        
+    # Add note
+    mw.col.add_note(note, deck_id)
+    return True
+
+def _update_note(note: Note, card_data: Dict, deck_id: int) -> bool:
+    # Update fields
+    changes = False
+    
+    if _fill_note_fields(note, card_data.get('fields', {})):
+        changes = True
+        
+    # Update tags
+    new_tags = card_data.get('tags', [])
+    if set(note.tags) != set(new_tags):
+        note.tags = new_tags
+        changes = True
+        
+    # Force move to correct deck if needed? 
+    # Usually cards are in decks, notes are just notes. 
+    # But for a single-deck download, we expect cards to be in that deck.
+    # Changing deck for all cards of this note:
+    for card in note.cards():
+        if card.did != deck_id:
+            card.did = deck_id
+            card.flush()
+            
+    if changes:
+        note.flush()
+        
+    return changes
+
+def _fill_note_fields(note: Note, fields_data: Any) -> bool:
+    """Populate note fields. Returns True if any field changed."""
+    changed = False
+    model_fields = mw.col.models.field_names(note.note_type())
+    # O(1) lookup
+    model_field_set = set(model_fields)
+    
+    # Handle dict (field_name: value)
+    if isinstance(fields_data, dict):
+        for fname, fval in fields_data.items():
+            if fname in model_field_set:
+                if note[fname] != fval:
+                    note[fname] = fval
+                    changed = True
+            else:
+                # Log warning for debugging data mismatches
+                logger.debug(f"Field '{fname}' not found in note type '{note.note_type()['name']}'")
+                    
+    # Handle list (values in order)
+    elif isinstance(fields_data, list):
+        for i, fval in enumerate(fields_data):
+            if i < len(model_fields):
+                fname = model_fields[i]
+                if note[fname] != fval:
+                    note[fname] = fval
+                    changed = True
+                    
+    return changed
 
 
-def import_deck_with_progress(deck_content: bytes, deck_name: str, 
+def import_deck_with_progress(deck_data_provider, deck_name: str, 
                               on_success=None, on_failure=None, parent=None):
     """
     Import a deck with progress tracking (runs in background)
     
     Args:
-        deck_content: The .apkg file content as bytes
+        deck_data_provider: Function that returns the deck data dict (api call)
+                            OR the dict itself
         deck_name: Name of the deck
-        on_success: Callback function when import succeeds (receives deck_id as int)
-        on_failure: Callback function when import fails (receives error message)
-        parent: Parent widget for the operation (defaults to mw)
-                Using the dialog as parent helps prevent orphaned operations
+        on_success: Callback(deck_id)
+        on_failure: Callback(error_msg)
+        parent: Parent widget
     """
-    # Default to main window if no parent provided
     if parent is None:
         parent = mw
     
-    def import_in_background():
-        """Background import operation"""
-        return import_deck(deck_content, deck_name)
+    def background_op():
+        # Clean way to fetch data inside the thread if a provider func is passed
+        data = deck_data_provider() if callable(deck_data_provider) else deck_data_provider
+        return import_deck_from_json(data, deck_name)
     
     def on_done(deck_id):
-        """Called when import succeeds"""
-        print(f"✓ Background import succeeded: deck_id = {deck_id}")
+        logger.info(f"Background import succeeded: {deck_id}")
         if on_success:
-            # Ensure we're passing an integer
             on_success(int(deck_id))
-    
+            
     def on_error(error):
-        """Called when import fails"""
-        error_msg = str(error)
-        print(f"✗ Background import failed: {error_msg}")
+        msg = str(error)
+        logger.error(f"Background import failed: {msg}")
         if on_failure:
-            on_failure(error_msg)
-    
-    # Use Anki's QueryOp for background operations
-    # FIXED: Use provided parent instead of always using mw
+            on_failure(msg)
+            
     op = QueryOp(
-        parent=parent,  # Use dialog as parent to bind lifecycle
-        op=lambda col: import_in_background(),
+        parent=parent,
+        op=lambda col: background_op(),
         success=on_done
     )
     op.failure(on_error)
     op.run_in_background()
 
 
+# Keep existing utility functions for compatibility/utility
 def get_deck_stats(deck_id: int) -> dict:
-    """
-    Get statistics for a deck
-    
-    Args:
-        deck_id: The Anki deck ID (integer)
-    
-    Returns:
-        Dictionary with deck statistics
-    """
+    """Get statistics for a deck using optimized SQL query"""
     try:
-        # Ensure deck_id is an integer
         deck_id = int(deck_id)
-        
-        # Get deck
         deck = mw.col.decks.get(deck_id)
-        
-        if not deck:
-            print(f"⚠ Deck {deck_id} not found")
+        if not deck: 
             return {}
         
-        # Get card IDs for this deck
-        card_ids = mw.col.decks.cids(deck_id, children=True)
-        total_cards = len(card_ids)
+        # Get all deck IDs (including children)
+        deck_ids = [deck_id] + [d[1] for d in mw.col.decks.children(deck_id)]
         
-        # Count new, learning, and review cards
-        new_cards = 0
-        learning_cards = 0
-        review_cards = 0
+        # Use SQL aggregation for efficiency (single query instead of N+1)
+        placeholders = ",".join("?" * len(deck_ids))
+        query = f"""
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN type = 0 THEN 1 ELSE 0 END) as new_cards,
+                SUM(CASE WHEN type = 1 THEN 1 ELSE 0 END) as learning_cards,
+                SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) as review_cards
+            FROM cards
+            WHERE did IN ({placeholders})
+        """
         
-        for card_id in card_ids:
-            card = mw.col.get_card(card_id)
-            if card.type == 0:  # New
-                new_cards += 1
-            elif card.type == 1:  # Learning
-                learning_cards += 1
-            elif card.type == 2:  # Review
-                review_cards += 1
+        result = mw.col.db.first(query, *deck_ids)
+        
+        if not result:
+            return {
+                'name': deck['name'],
+                'total_cards': 0,
+                'new_cards': 0,
+                'learning_cards': 0,
+                'review_cards': 0
+            }
         
         return {
             'name': deck['name'],
-            'total_cards': total_cards,
-            'new_cards': new_cards,
-            'learning_cards': learning_cards,
-            'review_cards': review_cards
+            'total_cards': result[0] or 0,
+            'new_cards': result[1] or 0,
+            'learning_cards': result[2] or 0,
+            'review_cards': result[3] or 0
         }
-    
     except Exception as e:
-        print(f"✗ Error getting deck stats for {deck_id}: {e}")
+        logger.error(f"Error getting deck stats for {deck_id}: {e}")
         return {}
 
-
-def get_all_deck_stats() -> list:
-    """
-    Get statistics for all decks
-    
-    Returns:
-        List of deck statistics
-    """
-    stats = []
-    
-    try:
-        # FIXED: Properly iterate over DeckNameId objects
-        for deck_info in mw.col.decks.all_names_and_ids():
-            deck_id = int(deck_info.id)  # Extract integer ID
-            deck_stats = get_deck_stats(deck_id)
-            if deck_stats:
-                stats.append(deck_stats)
-    
-    except Exception as e:
-        print(f"✗ Error getting all deck stats: {e}")
-    
-    return stats
-
-
 def deck_exists(deck_id: int) -> bool:
-    """
-    Check if a deck exists
-    
-    Args:
-        deck_id: The Anki deck ID (integer)
-    
-    Returns:
-        True if deck exists, False otherwise
-    """
+    """Check if a deck exists in Anki"""
     try:
-        deck_id = int(deck_id)
-        deck = mw.col.decks.get(deck_id)
-        return deck is not None
+        return mw.col.decks.get(int(deck_id)) is not None
     except Exception as e:
-        print(f"✗ Error checking deck existence for {deck_id}: {e}")
+        logger.debug(f"Deck check failed for {deck_id}: {e}")
         return False
 
-
 def delete_deck(deck_id: int) -> bool:
-    """
-    Delete a deck from Anki
-    
-    Args:
-        deck_id: The Anki deck ID (integer)
-    
-    Returns:
-        True if successful, False otherwise
-    """
+    """Delete a deck from Anki"""
     try:
-        deck_id = int(deck_id)
-        
-        if not deck_exists(deck_id):
-            print(f"✓ Deck {deck_id} doesn't exist (already deleted)")
-            return True
-        
-        # Delete the deck
-        mw.col.decks.remove([deck_id])
+        mw.col.decks.remove([int(deck_id)])
         mw.reset()
-        
-        print(f"✓ Deleted deck: {deck_id}")
         return True
-    
     except Exception as e:
-        print(f"✗ Error deleting deck {deck_id}: {e}")
+        logger.error(f"Failed to delete deck {deck_id}: {e}")
         return False

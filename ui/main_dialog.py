@@ -1,27 +1,33 @@
 """
 Deck Management Dialog for AnkiPH Addon
 AnkiHub-style two-panel layout with deck list and details
-Version: 3.3.0
+Version: 4.0.0 - Refactored with shared styles
 """
 
 import webbrowser
 from aqt.qt import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QListWidget, QListWidgetItem, QMessageBox, Qt,
-    QWidget, QSplitter, QFrame, QCheckBox, QSizePolicy, QApplication
+    QWidget, QSplitter, QFrame, QCheckBox, QSizePolicy, QApplication, QTimer
 )
 from aqt import mw
 from aqt.utils import showInfo, tooltip
 
 from ..api_client import api, set_access_token, AnkiPHAPIError, show_upgrade_prompt
 from ..config import config
-from ..deck_importer import import_deck
+from ..deck_importer import import_deck_from_json
 from ..utils import escape_anki_search
 from ..update_checker import update_checker
-from ..constants import HOMEPAGE_URL, TERMS_URL, PRIVACY_URL, PLANS_URL, COMMUNITY_URL
+from .styles import COLORS, apply_dark_theme
+from ..logger import logger
+from ..constants import (
+    HOMEPAGE_URL, TERMS_URL, PRIVACY_URL,
+    PLANS_URL, COMMUNITY_URL, DOCS_URL,
+    HELP_URL, CHANGELOG_URL
+)
 
 
-class DeckManagementDialog(QDialog):
+class AnkiPHMainDialog(QDialog):
     """AnkiHub-style two-panel deck management dialog"""
     
     def __init__(self, parent=None):
@@ -57,16 +63,26 @@ class DeckManagementDialog(QDialog):
     
     def _rebuild_ui(self):
         """Rebuild the UI (used after login to refresh in-place)"""
-        # Clear existing layout
+        # Invalidate config cache to ensure fresh login state check
+        config._invalidate_cache()
+        
+        # Clear existing layout and widgets properly
         if self.layout():
             old_layout = self.layout()
+            # Delete all child widgets
             while old_layout.count():
                 child = old_layout.takeAt(0)
                 if child.widget():
                     child.widget().deleteLater()
-            QWidget().setLayout(old_layout)
+            # Delete the layout itself - just orphaning it doesn't work in Qt
+            # Qt requires us to delete the layout from its parent
+            old_layout.deleteLater()
         
-        # Rebuild
+        # Schedule rebuild after current event loop processes deletion
+        QTimer.singleShot(0, self._finish_rebuild)
+    
+    def _finish_rebuild(self):
+        """Finish rebuilding the UI after cleanup"""
         self.setup_ui()
         self.apply_styles()
     
@@ -78,7 +94,7 @@ class DeckManagementDialog(QDialog):
         layout.setContentsMargins(15, 12, 15, 12)
         
         # Browse Decks button (primary)
-        browse_btn = QPushButton("🔗 Browse Decks")
+        browse_btn = QPushButton("Browse Decks")
         browse_btn.setObjectName("primaryBtn")
         browse_btn.clicked.connect(self.browse_decks)
         layout.addWidget(browse_btn)
@@ -202,7 +218,7 @@ class DeckManagementDialog(QDialog):
         layout.addWidget(self.install_status)
         
         # Sync/Install button
-        self.sync_btn = QPushButton("🔄 Sync to Install")
+        self.sync_btn = QPushButton("ðŸ”„ Sync to Install")
         self.sync_btn.setObjectName("syncBtn")
         self.sync_btn.clicked.connect(self.sync_install_deck)
         self.sync_btn.setVisible(False)
@@ -266,191 +282,209 @@ class DeckManagementDialog(QDialog):
         return bar
     
     def apply_styles(self):
-        """Apply dark theme styles matching AnkiHub"""
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1e1e1e;
-                color: #e0e0e0;
-            }
+        """Apply dark theme styles using shared COLORS"""
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {COLORS["bg_primary"]};
+                color: {COLORS["text_primary"]};
+            }}
             
-            #actionBar {
-                background-color: #252525;
-                border-bottom: 1px solid #333;
-            }
+            #actionBar {{
+                background-color: {COLORS["bg_tertiary"]};
+                border-bottom: 1px solid {COLORS["border"]};
+            }}
             
-            #primaryBtn {
-                background-color: #4a90d9;
+            #primaryBtn {{
+                background-color: {COLORS["btn_primary"]};
                 color: white;
                 border: none;
-                border-radius: 4px;
+                border-radius: 6px;
                 padding: 10px 24px;
                 font-weight: bold;
                 font-size: 13px;
-            }
-            #primaryBtn:hover {
-                background-color: #5a9fe9;
-            }
+            }}
+            #primaryBtn:hover {{
+                background-color: {COLORS["btn_primary_hover"]};
+            }}
             
-            #secondaryBtn {
+            #secondaryBtn {{
                 background-color: transparent;
-                color: #aaa;
-                border: 1px solid #555;
-                border-radius: 4px;
+                color: {COLORS["text_secondary"]};
+                border: 1px solid {COLORS["border"]};
+                border-radius: 6px;
                 padding: 10px 24px;
                 font-size: 13px;
-            }
-            #secondaryBtn:hover {
-                border-color: #888;
-                color: #fff;
-            }
+            }}
+            #secondaryBtn:hover {{
+                border-color: {COLORS["text_muted"]};
+                color: {COLORS["text_primary"]};
+            }}
             
-            #leftPanel {
-                background-color: #1e1e1e;
-                border-right: 1px solid #333;
-            }
+            #leftPanel {{
+                background-color: {COLORS["bg_primary"]};
+                border-right: 1px solid {COLORS["border"]};
+            }}
             
-            #panelHeader {
-                background-color: #252525;
-                color: #fff;
+            #panelHeader {{
+                background-color: {COLORS["bg_tertiary"]};
+                color: {COLORS["text_primary"]};
                 font-weight: bold;
                 font-size: 12px;
                 padding: 12px 15px;
-                border-bottom: 1px solid #333;
-            }
+                border-bottom: 1px solid {COLORS["border"]};
+            }}
             
-            #deckList {
-                background-color: #1e1e1e;
+            #deckList {{
+                background-color: {COLORS["bg_primary"]};
                 border: none;
-                color: #e0e0e0;
+                color: {COLORS["text_primary"]};
                 font-size: 13px;
-            }
-            #deckList::item {
-                padding: 10px 15px;
-                border-bottom: 1px solid #2a2a2a;
-            }
-            #deckList::item:selected {
-                background-color: #3a5070;
+            }}
+            #deckList::item {{
+                padding: 12px 15px;
+                border-bottom: 1px solid {COLORS["bg_secondary"]};
+                border-radius: 4px;
+                margin: 2px 4px;
+            }}
+            #deckList::item:selected {{
+                background-color: {COLORS["bg_selected"]};
                 color: white;
-            }
-            #deckList::item:hover:!selected {
-                background-color: #2a2a2a;
-            }
+            }}
+            #deckList::item:hover:!selected {{
+                background-color: {COLORS["bg_hover"]};
+            }}
             
-            #rightPanel {
-                background-color: #1e1e1e;
-            }
+            #rightPanel {{
+                background-color: {COLORS["bg_primary"]};
+            }}
             
-            #detailTitle {
-                color: #4a90d9;
+            #detailTitle {{
+                color: {COLORS["btn_primary"]};
                 font-size: 18px;
                 font-weight: bold;
-            }
+            }}
             
-            #outlineBtn {
+            #outlineBtn {{
                 background-color: transparent;
-                color: #aaa;
-                border: 1px solid #555;
-                border-radius: 4px;
+                color: {COLORS["text_secondary"]};
+                border: 1px solid {COLORS["border"]};
+                border-radius: 6px;
                 padding: 8px 16px;
                 font-size: 12px;
-            }
-            #outlineBtn:hover {
-                border-color: #888;
-                color: #fff;
-            }
-            #outlineBtn:disabled {
-                color: #555;
-                border-color: #333;
-            }
+            }}
+            #outlineBtn:hover {{
+                border-color: {COLORS["text_muted"]};
+                color: {COLORS["text_primary"]};
+            }}
+            #outlineBtn:disabled {{
+                color: {COLORS["border"]};
+                border-color: {COLORS["bg_tertiary"]};
+            }}
             
-            #dangerOutlineBtn {
+            #dangerOutlineBtn {{
                 background-color: transparent;
-                color: #e57373;
-                border: 1px solid #e57373;
-                border-radius: 4px;
+                color: {COLORS["error"]};
+                border: 1px solid {COLORS["error"]};
+                border-radius: 6px;
                 padding: 8px 16px;
                 font-size: 12px;
-            }
-            #dangerOutlineBtn:hover {
-                background-color: #e57373;
+            }}
+            #dangerOutlineBtn:hover {{
+                background-color: {COLORS["error"]};
                 color: white;
-            }
-            #dangerOutlineBtn:disabled {
-                color: #555;
-                border-color: #333;
-            }
+            }}
+            #dangerOutlineBtn:disabled {{
+                color: {COLORS["border"]};
+                border-color: {COLORS["bg_tertiary"]};
+            }}
             
-            #separator {
-                color: #333;
-            }
+            #separator {{
+                color: {COLORS["border"]};
+            }}
             
-            #sectionHeader {
-                color: #fff;
+            #sectionHeader {{
+                color: {COLORS["text_primary"]};
                 font-weight: bold;
                 font-size: 13px;
                 margin-top: 5px;
-            }
+            }}
             
-            #installStatus {
-                color: #ffa726;
+            #installStatus {{
+                color: {COLORS["warning"]};
                 font-size: 12px;
-            }
+            }}
             
-            #syncBtn {
-                background-color: #4a90d9;
+            #syncBtn {{
+                background-color: {COLORS["btn_primary"]};
                 color: white;
                 border: none;
-                border-radius: 4px;
+                border-radius: 6px;
                 padding: 10px 20px;
                 font-size: 13px;
-            }
-            #syncBtn:hover {
-                background-color: #5a9fe9;
-            }
+                font-weight: bold;
+            }}
+            #syncBtn:hover {{
+                background-color: {COLORS["btn_primary_hover"]};
+            }}
             
-            #infoLabel {
-                color: #888;
+            #infoLabel {{
+                color: {COLORS["text_muted"]};
                 font-size: 12px;
-            }
+            }}
             
-            #statusBar {
-                background-color: #252525;
-                border-top: 1px solid #333;
-            }
+            #statusBar {{
+                background-color: {COLORS["bg_tertiary"]};
+                border-top: 1px solid {COLORS["border"]};
+                max-height: 44px;
+            }}
             
-            #statusText {
-                color: #888;
+            #statusText {{
+                color: {COLORS["text_muted"]};
                 font-size: 11px;
-            }
+            }}
             
-            #subscriptionBadge {
-                background-color: #4CAF50;
+            #subscriptionBadge {{
+                background-color: {COLORS["success"]};
                 color: white;
                 padding: 3px 10px;
                 border-radius: 10px;
                 font-size: 10px;
-            }
+                font-weight: bold;
+                max-height: 20px;
+                min-height: 16px;
+            }}
             
-            #freeBadge {
-                background-color: #FF9800;
+            #freeBadge {{
+                background-color: {COLORS["warning"]};
                 color: white;
                 padding: 3px 10px;
                 border-radius: 10px;
                 font-size: 10px;
-            }
+                font-weight: bold;
+                max-height: 20px;
+                min-height: 16px;
+            }}
             
-            #linkBtn {
+            #linkBtn {{
                 background: transparent;
                 border: none;
-                color: #4a90d9;
+                color: {COLORS["text_link"]};
                 font-size: 12px;
                 padding: 5px 10px;
-            }
-            #linkBtn:hover {
-                color: #6ab0f9;
-                text-decoration: underline;
-            }
+            }}
+            #linkBtn:hover {{
+                color: {COLORS["btn_primary_hover"]};
+            }}
+            
+            QSplitter::handle {{
+                background-color: {COLORS["border"]};
+                width: 1px;
+            }}
+            QSplitter::handle:hover {{
+                background-color: {COLORS["text_muted"]};
+            }}
         """)
+
     
     # === DATA LOADING ===
     
@@ -459,8 +493,9 @@ class DeckManagementDialog(QDialog):
         self.deck_list.clear()
         
         try:
-            # First, sync subscriptions from server
-            self._sync_subscriptions_from_server()
+            # DEBUG: PHASE 1 - Isolate Network Sync
+            logger.info("DEBUG: Entering load_decks (Network Sync DISABLED)")
+            # self._sync_subscriptions_from_server()
             
             downloaded_decks = config.get_downloaded_decks()
             
@@ -473,27 +508,56 @@ class DeckManagementDialog(QDialog):
             # Import deck_exists helper
             from ..deck_importer import deck_exists
             
+            # Batch check for installed decks to avoid N+1 queries
+            all_anki_ids = []
+            for d_info in downloaded_decks.values():
+                aid = d_info.get('anki_deck_id')
+                if aid:
+                    try:
+                        all_anki_ids.append(int(aid))
+                    except (ValueError, TypeError):
+                        pass
+            
+            # PHASE 2: Isolate Collection Access
+            existing_deck_ids = set()
+            try:
+                if mw.col:
+                    logger.info("DEBUG: Accessing mw.col.decks")
+                    all_decks_in_col = mw.col.decks.all_names_and_ids()
+                    existing_deck_ids = {d.id for d in all_decks_in_col}
+                    logger.info(f"DEBUG: Found {len(existing_deck_ids)} local decks")
+            except Exception as coll_err:
+                logger.error(f"DEBUG: HIDDEN ERROR in collection access: {coll_err}")
+                # Don't fail the whole load if collection access fails
+            
+            logger.info("DEBUG: Entering item loop - PRE-LOOP")
+            if not downloaded_decks:
+                logger.info("DEBUG: downloaded_decks is empty")
+            else:
+                logger.info(f"DEBUG: downloaded_decks has {len(downloaded_decks)} keys")
+
             for deck_id, deck_info in downloaded_decks.items():
+                logger.info(f"DEBUG: Iterating deck {deck_id}")
                 # Get deck name - prefer server title, fallback to Anki deck name
                 anki_deck_id = deck_info.get('anki_deck_id')
                 server_title = deck_info.get('title')
                 deck_name = server_title or f"Deck {deck_id[:8]}"
                 is_installed = False
                 
-                if anki_deck_id and mw.col:
-                    # Use proper deck_exists check
-                    is_installed = deck_exists(anki_deck_id)
-                    if is_installed and not server_title:
-                        # Only use Anki name if no server title
-                        try:
-                            deck = mw.col.decks.get(int(anki_deck_id))
+                if anki_deck_id:
+                    try:
+                        aid_int = int(anki_deck_id)
+                        is_installed = aid_int in existing_deck_ids
+                        
+                        if is_installed and not server_title and mw.col:
+                            deck = mw.col.decks.get(aid_int)
                             if deck and deck['name'] != 'Default':
                                 deck_name = deck['name']
-                        except:
-                            pass
+                    except (ValueError, TypeError):
+                        pass
                 
-                # Show install status in list (only show ⚠ for not installed)
-                prefix = "" if is_installed else "⚠ "
+                # Show install status in list (use bullet for not installed)
+                prefix = "â— " if is_installed else "â—‹ "
                 item = QListWidgetItem(f"{prefix}{deck_name}")
                 item.setData(Qt.ItemDataRole.UserRole, {
                     'deck_id': deck_id,
@@ -504,7 +568,7 @@ class DeckManagementDialog(QDialog):
                 self.deck_list.addItem(item)
         
         except Exception as e:
-            print(f"Error loading decks: {e}")
+            logger.exception(f"Error loading decks: {e}")
     
     def _sync_subscriptions_from_server(self):
         """Sync subscriptions from server to local config"""
@@ -512,6 +576,7 @@ class DeckManagementDialog(QDialog):
             return
         
         try:
+            logger.info("DEBUG: Starting _sync_subscriptions_from_server")
             token = config.get_access_token()
             if token:
                 set_access_token(token)
@@ -535,16 +600,16 @@ class DeckManagementDialog(QDialog):
                             title=deck.get('title'),
                             card_count=deck.get('card_count')
                         )
-                        print(f"✓ Synced subscription: {deck.get('title')}")
+                        logger.info(f"Synced subscription: {deck.get('title')}")
                 
                 # Remove local entries not on server anymore
                 for deck_id in list(local_decks.keys()):
                     if deck_id not in server_deck_ids:
                         config.remove_downloaded_deck(deck_id)
-                        print(f"✓ Removed unsubscribed deck: {deck_id}")
+                        logger.info(f"Removed unsubscribed deck: {deck_id}")
         
         except Exception as e:
-            print(f"⚠ Subscription sync failed (non-critical): {e}")
+            logger.warning(f"Subscription sync failed (non-critical): {e}")
     
     def on_deck_selected(self, item):
         """Handle deck selection - show details in right panel"""
@@ -569,17 +634,17 @@ class DeckManagementDialog(QDialog):
         has_update = config.has_update_available(data.get('deck_id', ''))
         
         if not is_installed:
-            self.install_status.setText("⚠ This deck is not installed yet!")
+            self.install_status.setText("âš  This deck is not installed yet!")
             self.install_status.setStyleSheet("color: #ffa726;")
-            self.sync_btn.setText("🔄 Sync to Install")
+            self.sync_btn.setText("ðŸ”„ Sync to Install")
             self.sync_btn.setVisible(True)
         elif has_update:
-            self.install_status.setText("⬆ Update available!")
+            self.install_status.setText("â¬† Update available!")
             self.install_status.setStyleSheet("color: #4a90d9;")
-            self.sync_btn.setText("🔄 Sync Update")
+            self.sync_btn.setText("ðŸ”„ Sync Update")
             self.sync_btn.setVisible(True)
         else:
-            self.install_status.setText("✓ Installed and up to date")
+            self.install_status.setText("âœ“ Installed and up to date")
             self.install_status.setStyleSheet("color: #4CAF50;")
             self.sync_btn.setVisible(False)
         
@@ -609,8 +674,7 @@ class DeckManagementDialog(QDialog):
         dialog = CreateDeckConfirmDialog(self)
         if dialog.exec():
             # Open deck creation form
-            from .tabbed_dialog import TabbedDialog
-            # For now, just show info - full creation UI would be added later
+            # Deck creation is done on the web
             showInfo("Deck creation feature coming soon!\n\nYou can create decks at:\n" + HOMEPAGE_URL)
     
     def sync_install_deck(self):
@@ -631,7 +695,7 @@ class DeckManagementDialog(QDialog):
         # Show loading state
         self.setCursor(Qt.CursorShape.WaitCursor)
         self.sync_btn.setEnabled(False)
-        self.sync_btn.setText("Downloading...")
+        self.sync_btn.setText("Syncing...")
         QApplication.processEvents()
         
         try:
@@ -639,47 +703,34 @@ class DeckManagementDialog(QDialog):
             if token:
                 set_access_token(token)
             
+            # Get deck data (JSON)
             result = api.download_deck(deck_id)
-            print(f"✓ download_deck response: {result}")
+            print(f"âœ“ download_deck response: success={result.get('success')}")
             
             if not result.get('success'):
-                raise Exception(result.get('error', 'Download failed'))
+                raise Exception(result.get('error', 'Sync failed'))
             
-            # V3.0 flow: use pull-changes for card data
-            if result.get('use_pull_changes'):
-                self.sync_btn.setText("Fetching cards...")
-                QApplication.processEvents()
-                self._install_from_pull_changes(deck_id, result)
-                return
+            # Use unified JSON import
+            self.sync_btn.setText("Importing data...")
+            QApplication.processEvents()
             
-            # Legacy flow: download .apkg file
-            if result.get('download_url'):
-                download_url = result['download_url']
-                print(f"✓ Got download URL: {download_url[:80]}...")
-                
-                self.sync_btn.setText("Importing...")
-                QApplication.processEvents()
-                
-                deck_content = api.download_deck_file(download_url)
-                anki_deck_id = import_deck(deck_content, deck_name)
-                
-                if anki_deck_id:
-                    config.save_downloaded_deck(
-                        deck_id,
-                        result.get('version', '1.0'),
-                        anki_deck_id,
-                        title=result.get('title', deck_name)
-                    )
-                    tooltip(f"✓ {deck_name} installed!")
-                    self.load_decks()
-                else:
-                    raise Exception("Import failed")
-                return
+            anki_deck_id = import_deck_from_json(result, deck_name)
             
-            raise Exception("No download method available (missing use_pull_changes and download_url)")
-        
+            if anki_deck_id:
+                config.save_downloaded_deck(
+                    deck_id,
+                    result.get('version', '1.0'),
+                    anki_deck_id,
+                    title=result.get('title', deck_name),
+                    card_count=len(result.get('cards', []))
+                )
+                tooltip(f"âœ“ {deck_name} synced!")
+                self.load_decks()
+            else:
+                raise Exception("Import returned invalid deck ID")
+                
         except Exception as e:
-            print(f"✗ Install error: {e}")
+            logger.error(f"Install error: {e}")
             QMessageBox.critical(self, "Error", f"Install failed: {e}")
         finally:
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -700,7 +751,7 @@ class DeckManagementDialog(QDialog):
             
             # Use paginated pull to get ALL cards
             changes_result = api.pull_all_cards(deck_id, progress_callback=update_progress)
-            print(f"✓ pull_all_cards response: success={changes_result.get('success')}, cards={len(changes_result.get('cards', []))}")
+            logger.info(f"pull_all_cards response: success={changes_result.get('success')}, cards={len(changes_result.get('cards', []))}")
             
             if not changes_result.get('success'):
                 raise Exception(changes_result.get('error', 'Failed to fetch cards'))
@@ -732,13 +783,13 @@ class DeckManagementDialog(QDialog):
                 if last_change_id:
                     self._save_last_change_id(deck_id, last_change_id)
                 
-                tooltip(f"✓ {deck_info.get('title', 'Deck')} installed! ({len(cards)} cards)")
+                tooltip(f"âœ“ {deck_info.get('title', 'Deck')} installed! ({len(cards)} cards)")
                 self.load_decks()
             else:
                 raise Exception("Failed to build deck in Anki")
         
         except Exception as e:
-            print(f"✗ Pull changes install error: {e}")
+            logger.exception(f"Pull changes install error: {e}")
             raise
     
     def _build_deck_from_json(self, deck_id, deck_info, cards, note_types):
@@ -761,7 +812,7 @@ class DeckManagementDialog(QDialog):
         # Don't pre-create deck - let _add_card_to_deck create it when adding cards
         # This prevents empty duplicate decks
         did = None
-        print(f"✓ Will create deck: {deck_name}")
+        logger.info(f"Will create deck: {deck_name}")
         
         # Create note types first
         for nt in note_types:
@@ -785,7 +836,7 @@ class DeckManagementDialog(QDialog):
         # Get the actual deck ID (created when adding cards)
         actual_did = col.decks.id(deck_name)
         
-        print(f"✓ Deck built: {cards_added} added, {cards_updated} updated (deck ID: {actual_did})")
+        print(f"âœ“ Deck built: {cards_added} added, {cards_updated} updated (deck ID: {actual_did})")
         return actual_did
     
     def _create_or_update_note_type(self, col, note_type_data):
@@ -822,7 +873,7 @@ class DeckManagementDialog(QDialog):
         model['css'] = note_type_data.get('css', '')
         
         col.models.add(model)
-        print(f"✓ Created note type: {model_name}")
+        print(f"âœ“ Created note type: {model_name}")
         return model
     
     def _add_card_to_deck(self, col, deck_id, deck_name, card_data):
@@ -841,7 +892,7 @@ class DeckManagementDialog(QDialog):
             # Fallback to Basic
             model = col.models.by_name('Basic')
             if not model:
-                print(f"⚠ No note type found for {note_type_name}")
+                print(f"âš  No note type found for {note_type_name}")
                 return None
         
         # Check if note already exists by guid (escape special chars for search)
@@ -933,9 +984,10 @@ class DeckManagementDialog(QDialog):
         from .login_dialog import LoginDialog
         dialog = LoginDialog(self)
         if dialog.exec():
-            # Refresh UI in-place instead of requiring reopen
-            tooltip("Login successful!")
-            self._rebuild_ui()
+            # Instead of rebuilding in-place (which can be unstable), 
+            # we close the dialog and ask the user to reopen it.
+            tooltip("Login successful! Please reopen AnkiPH to see your decks.")
+            self.accept()  # Close the current dialog
     
     def open_settings(self):
         """Open settings dialog"""
@@ -965,8 +1017,9 @@ class DeckBrowserDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Browse Decks")
-        self.setMinimumSize(450, 350)
+        self.setMinimumSize(500, 400)
         self.setup_ui()
+        apply_dark_theme(self)
     
     def setup_ui(self):
         layout = QVBoxLayout()
@@ -989,11 +1042,13 @@ class DeckBrowserDialog(QDialog):
         # Buttons
         btn_row = QHBoxLayout()
         
-        sub_btn = QPushButton("Subscribe")
-        sub_btn.clicked.connect(self.subscribe_selected)
-        btn_row.addWidget(sub_btn)
-        
         btn_row.addStretch()
+        
+        sub_btn = QPushButton("Subscribe")
+        sub_btn.setStyleSheet(f"background-color: {COLORS['btn_primary']}; color: white; padding: 10px 20px; border: none; border-radius: 6px; font-weight: bold;")
+        btn_row.addWidget(sub_btn)
+        sub_btn.clicked.connect(self.subscribe_selected)
+        
         
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.reject)
@@ -1025,7 +1080,7 @@ class DeckBrowserDialog(QDialog):
                     name = deck.get('title') or deck.get('name', 'Unknown')
                     
                     is_subscribed = deck_id in downloaded
-                    prefix = "✓ " if is_subscribed else ""
+                    prefix = "âœ“ " if is_subscribed else ""
                     
                     item = QListWidgetItem(f"{prefix}{name}")
                     item.setData(Qt.ItemDataRole.UserRole, deck)
@@ -1072,39 +1127,42 @@ class DeckBrowserDialog(QDialog):
         deck_name = deck.get('title') or deck.get('name')
         
         self.status.setText("Installing...")
+        QApplication.processEvents()
         
         try:
             token = config.get_access_token()
             if token:
                 set_access_token(token)
             
+            # Get deck data (JSON) directly
             result = api.download_deck(deck_id)
-            print(f"✓ download_deck response: {result}")
+            print(f"âœ“ download_deck response: success={result.get('success')}")
             
-            if result.get('success') and result.get('download_url'):
-                download_url = result['download_url']
+            if result.get('success'):
+                # Use unified JSON import
+                self.status.setText("Importing data...")
+                QApplication.processEvents()
                 
-                # Download file
-                deck_content = api.download_deck_file(download_url)
-                
-                # Import
-                anki_deck_id = import_deck(deck_content, deck_name)
+                # Import the deck
+                anki_deck_id = import_deck_from_json(result, deck_name)
                 
                 if anki_deck_id:
                     config.save_downloaded_deck(
                         deck_id,
-                        deck.get('version', '1.0'),
-                        anki_deck_id
+                        result.get('version', '1.0'),
+                        anki_deck_id,
+                        title=result.get('title', deck_name),
+                        card_count=len(result.get('cards', []))
                     )
                     QMessageBox.information(self, "Success", f"Subscribed to {deck_name}!")
                     self.accept()
                 else:
-                    raise Exception("Import failed")
+                    raise Exception("Import returned invalid deck ID")
             else:
-                raise Exception(result.get('message', 'No download URL'))
+                raise Exception(result.get('error', 'Sync failed'))
         
         except Exception as e:
-            print(f"✗ Subscribe error: {e}")
+            logger.error(f"Subscribe error: {e}")
             self.status.setText("Failed")
             QMessageBox.critical(self, "Error", f"Subscribe failed: {e}")
 
@@ -1115,10 +1173,11 @@ class SyncInstallDialog(QDialog):
     def __init__(self, parent=None, deck_names=None):
         super().__init__(parent)
         self.setWindowTitle("AnkiPH | Sync")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(450)
         self.deck_names = deck_names or []
         self.use_recommended_settings = True
         self.setup_ui()
+        apply_dark_theme(self)
     
     def setup_ui(self):
         layout = QVBoxLayout()
@@ -1131,13 +1190,13 @@ class SyncInstallDialog(QDialog):
         
         # Deck list
         for name in self.deck_names:
-            item = QLabel(f"• {name}")
+            item = QLabel(f"â€¢ {name}")
             item.setStyleSheet("color: #4a90d9; padding-left: 10px;")
             layout.addWidget(item)
         
         # Warning
         warning = QLabel(
-            "⚠ Please go to your other devices with Anki and sync before installing new deck(s).\n"
+            "âš  Please go to your other devices with Anki and sync before installing new deck(s).\n"
             "Any unsynchronized reviews or changes on other devices may be lost during installation."
         )
         warning.setStyleSheet("color: #ffa726; font-size: 11px; padding: 10px; background-color: #2d2d2d; border-radius: 4px;")
@@ -1178,8 +1237,9 @@ class CreateDeckConfirmDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Confirm AnkiPH Deck Creation")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(450)
         self.setup_ui()
+        apply_dark_theme(self)
     
     def setup_ui(self):
         layout = QVBoxLayout()
@@ -1243,4 +1303,4 @@ def show_membership_required_dialog(parent=None):
 
 
 # For backwards compatibility - alias to new dialog
-AnkiPHMainDialog = DeckManagementDialog
+# DeckManagementDialog = AnkiPHMainDialog

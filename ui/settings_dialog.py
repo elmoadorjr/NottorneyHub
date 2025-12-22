@@ -1,7 +1,7 @@
 """
 Settings Dialog for AnkiPH Addon
 Features: General settings, Protected Fields, Sync, Admin (for admins)
-Version: 2.1.0
+Version: 4.0.0 - Refactored with shared styles
 """
 
 from aqt.qt import (
@@ -13,45 +13,18 @@ from aqt.qt import (
 from aqt import mw
 import webbrowser
 
-from ..api_client import api, set_access_token, AnkiPHAPIError
+from ..api_client import api, set_access_token, AnkiPHAPIError, ensure_valid_token
 from ..config import config
 from ..utils import escape_anki_search
+from .styles import COLORS, apply_dark_theme
+from ..logger import logger
 from ..constants import (
-    ADDON_VERSION, HOMEPAGE_URL, DOCS_URL, HELP_URL,
-    TERMS_URL, PRIVACY_URL, CHANGELOG_URL
+    ADDON_VERSION, DOCS_URL, HELP_URL, CHANGELOG_URL,
+    TERMS_URL, PRIVACY_URL, HOMEPAGE_URL
 )
 
 
-def ensure_valid_token():
-    """
-    Ensure we have a valid access token, refreshing if needed.
-    Returns True if we have a valid token, False otherwise.
-    """
-    token = config.get_access_token()
-    if not token:
-        return False
-    
-    # Try to refresh if we have a refresh token
-    refresh_token = config.get_refresh_token()
-    if refresh_token:
-        try:
-            result = api.refresh_token(refresh_token)
-            if result.get('success'):
-                new_access = result.get('access_token')
-                new_refresh = result.get('refresh_token', refresh_token)
-                expires_at = result.get('expires_at')
-                
-                if new_access:
-                    config.save_tokens(new_access, new_refresh, expires_at)
-                    set_access_token(new_access)
-                    print("✓ Token refreshed successfully")
-                    return True
-        except Exception as e:
-            print(f"✗ Token refresh failed: {e}")
-    
-    # Use existing token
-    set_access_token(token)
-    return True
+
 
 
 def is_auth_error(error):
@@ -65,9 +38,10 @@ class SettingsDialog(QDialog):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("⚙️ AnkiPH Settings")
+        self.setWindowTitle("AnkiPH Settings")
         self.setMinimumSize(600, 500)
         self.setup_ui()
+        apply_dark_theme(self)
         self.load_settings()
     
     def setup_ui(self):
@@ -852,9 +826,9 @@ class SettingsDialog(QDialog):
             from ..sync import clean_deleted_backend_decks
             cleaned = clean_deleted_backend_decks()
             if cleaned > 0:
-                print(f"✓ Cleaned {cleaned} server-deleted deck(s) from config")
+                logger.info(f"Cleaned {cleaned} server-deleted deck(s) from config")
         except Exception as e:
-            print(f"⚠ Cleanup check failed: {e}")
+            logger.error(f"Cleanup check failed: {e}")
         
         # Get all Anki decks
         all_decks = mw.col.decks.all_names_and_ids()
@@ -1043,10 +1017,31 @@ class SettingsDialog(QDialog):
         self.admin_log(f"🔄 Collecting cards from deck...")
         
         try:
-            # Get all notes from this deck (escape special chars like parentheses in deck names)
+            # FIXED: Use parameterized query instead of string formatting
+            # Get all notes from this deck using card IDs (safer approach)
             deck_name = mw.col.decks.get(anki_deck_id)['name']
-            escaped_deck_name = escape_anki_search(deck_name)
-            note_ids = mw.col.find_notes(f'"deck:{escaped_deck_name}"')
+            
+            # Get all card IDs for this deck
+            card_ids = mw.col.decks.cids(anki_deck_id, children=True)
+            
+            if not card_ids:
+                self.admin_log(f"❌ No cards found in deck")
+                QMessageBox.warning(self, "No Cards", "No cards found in the selected deck.")
+                return
+            
+            # Get unique note IDs from cards using parameterized query
+            # Chunk card IDs to avoid SQLite's 999 parameter limit
+            note_ids = set()
+            chunk_size = 999
+            
+            for i in range(0, len(card_ids), chunk_size):
+                chunk = card_ids[i:i + chunk_size]
+                placeholders = ",".join("?" * len(chunk))
+                query = f"SELECT DISTINCT nid FROM cards WHERE id IN ({placeholders})"
+                chunk_note_ids = mw.col.db.list(query, *chunk)
+                note_ids.update(chunk_note_ids)
+            
+            note_ids = list(note_ids)
             
             changes = []
             for nid in note_ids:
@@ -1213,10 +1208,29 @@ class SettingsDialog(QDialog):
         self.admin_log(f"🔄 Collecting all cards from deck...")
         
         try:
-            # Get all notes from this deck (escape special chars like parentheses in deck names)
+            # FIXED: Use same approach as admin_push_changes
             deck_name = mw.col.decks.get(anki_deck_id)['name']
-            escaped_deck_name = escape_anki_search(deck_name)
-            note_ids = mw.col.find_notes(f'"deck:{escaped_deck_name}"')
+            
+            # Get all card IDs for this deck
+            card_ids = mw.col.decks.cids(anki_deck_id, children=True)
+            
+            if not card_ids:
+                self.admin_log(f"❌ No cards found in deck")
+                QMessageBox.warning(self, "No Cards", "No cards found in the selected deck.")
+                return
+            
+            # Get unique note IDs from cards using parameterized query
+            note_ids = set()
+            chunk_size = 999
+            
+            for i in range(0, len(card_ids), chunk_size):
+                chunk = card_ids[i:i + chunk_size]
+                placeholders = ",".join("?" * len(chunk))
+                query = f"SELECT DISTINCT nid FROM cards WHERE id IN ({placeholders})"
+                chunk_note_ids = mw.col.db.list(query, *chunk)
+                note_ids.update(chunk_note_ids)
+            
+            note_ids = list(note_ids)
             
             cards = []
             for nid in note_ids:
@@ -1237,7 +1251,7 @@ class SettingsDialog(QDialog):
                     "note_type": note.note_type()['name'],
                     "fields": fields,
                     "tags": note.tags,
-                    "deck_path": deck_path  # e.g., "AnkiPH::Political Law::Constitutional Law I"
+                    "deck_path": deck_path
                 })
             
             self.admin_log(f"📦 Found {len(cards)} cards to import")

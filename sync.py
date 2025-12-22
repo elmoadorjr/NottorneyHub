@@ -1,8 +1,8 @@
 """
 Progress syncing for the AnkiPH addon
 Syncs study progress to the server
-Updated for v3.0 API with improved field names and single-deck support
-Version: 3.0.0
+Updated for v4.0 API with improved field names and single-deck support
+Version: 4.0.0
 """
 
 from aqt import mw
@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from .api_client import api, AnkiPHAPIError, set_access_token
 from .config import config
 from .deck_importer import get_deck_stats, deck_exists
+from .logger import logger
 
 
 def get_progress_data() -> list:
@@ -23,18 +24,18 @@ def get_progress_data() -> list:
     progress_data = []
     decks_to_remove = []
     
-    print(f"Checking progress for {len(downloaded_decks)} tracked deck(s)...")
+    logger.info(f"Checking progress for {len(downloaded_decks)} tracked deck(s)...")
     
     for deck_id, deck_info in downloaded_decks.items():
         anki_deck_id = deck_info.get('anki_deck_id')
         
         if not anki_deck_id:
-            print(f"⚠ Deck {deck_id} has no Anki ID, skipping...")
+            logger.warning(f"Deck {deck_id} has no Anki ID, skipping...")
             continue
         
         # Check if deck still exists in Anki
         if not deck_exists(anki_deck_id):
-            print(f"⚠ Deck {deck_id} (Anki ID: {anki_deck_id}) no longer exists, marking for removal...")
+            logger.warning(f"Deck {deck_id} (Anki ID: {anki_deck_id}) no longer exists, marking for removal...")
             decks_to_remove.append(deck_id)
             continue
         
@@ -43,7 +44,7 @@ def get_progress_data() -> list:
             stats = get_deck_stats(anki_deck_id)
             
             if not stats:
-                print(f"⚠ No stats for deck {deck_id}, using defaults...")
+                logger.warning(f"No stats for deck {deck_id}, using defaults...")
                 stats = {
                     'total_cards': 0,
                     'new_cards': 0,
@@ -78,16 +79,16 @@ def get_progress_data() -> list:
             }
             
             progress_data.append(progress)
-            print(f"OK Prepared progress data for deck {deck_id}")
+            logger.info(f"Prepared progress data for deck {deck_id}")
             
         except Exception as e:
-            print(f"X Error processing deck {deck_id}: {e}")
+            logger.error(f"Error processing deck {deck_id}: {e}")
             continue
     
     # Clean up decks that no longer exist
     for deck_id in decks_to_remove:
         config.remove_downloaded_deck(deck_id)
-        print(f"OK Removed non-existent deck {deck_id} from tracking")
+        logger.info(f"Removed non-existent deck {deck_id} from tracking")
     
     return progress_data
 
@@ -121,25 +122,31 @@ def calculate_retention_rate(deck_id: int) -> float:
             return 0.0
         
         # Use parameterized query with placeholders (prevent SQL injection)
-        placeholders = ",".join("?" * len(valid_card_ids))
+        # Chunk the IDs to avoid SQLite limit (999 variables)
+        total_reviews = 0
+        correct_reviews = 0
+        chunk_size = 999
         
-        # Query review log with parameterized values
-        query = f"""
-            SELECT 
-                COUNT(*) as total_reviews,
-                SUM(CASE WHEN ease >= 2 THEN 1 ELSE 0 END) as correct_reviews
-            FROM revlog
-            WHERE cid IN ({placeholders})
-            AND id >= ?
-        """
+        for i in range(0, len(valid_card_ids), chunk_size):
+            chunk = valid_card_ids[i:i + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            
+            query = f"""
+                SELECT 
+                    COUNT(*) as total_reviews,
+                    SUM(CASE WHEN ease >= 2 THEN 1 ELSE 0 END) as correct_reviews
+                FROM revlog
+                WHERE cid IN ({placeholders})
+                AND id >= ?
+            """
+            
+            res = mw.col.db.first(query, *chunk, cutoff_time)
+            if res:
+                total_reviews += res[0] or 0
+                correct_reviews += res[1] or 0
         
-        result = mw.col.db.first(query, *valid_card_ids, cutoff_time)
-        
-        if not result or result[0] == 0:
+        if total_reviews == 0:
             return 0.0
-        
-        total_reviews = result[0]
-        correct_reviews = result[1] or 0
         
         # Calculate percentage
         retention_rate = (correct_reviews / total_reviews) * 100
@@ -147,7 +154,7 @@ def calculate_retention_rate(deck_id: int) -> float:
         return round(retention_rate, 2)
     
     except Exception as e:
-        print(f"✗ Error calculating retention rate for deck {deck_id}: {e}")
+        logger.error(f"Error calculating retention rate for deck {deck_id}: {e}")
         return 0.0
 
 
@@ -177,20 +184,29 @@ def calculate_current_streak(deck_id: int) -> int:
             return 0
         
         # Use parameterized query with placeholders (prevent SQL injection)
-        placeholders = ",".join("?" * len(valid_card_ids))
+        # Chunk the IDs to avoid SQLite limit (999 variables)
+        review_dates = set()
+        chunk_size = 999
         
-        # Get distinct review dates
-        query = f"""
-            SELECT DISTINCT DATE(id / 1000, 'unixepoch', 'localtime') as review_date
-            FROM revlog
-            WHERE cid IN ({placeholders})
-            ORDER BY review_date DESC
-        """
-        
-        review_dates = mw.col.db.list(query, *valid_card_ids)
+        for i in range(0, len(valid_card_ids), chunk_size):
+            chunk = valid_card_ids[i:i + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            
+            # Get distinct review dates
+            query = f"""
+                SELECT DISTINCT DATE(id / 1000, 'unixepoch', 'localtime') as review_date
+                FROM revlog
+                WHERE cid IN ({placeholders})
+            """
+            chunk_dates = mw.col.db.list(query, *chunk)
+            review_dates.update(chunk_dates)
         
         if not review_dates:
             return 0
+        
+        # Sort dates descending
+        sorted_dates = sorted(list(review_dates), reverse=True)
+        review_dates = sorted_dates
         
         # Parse dates
         parsed_dates = []
@@ -199,7 +215,7 @@ def calculate_current_streak(deck_id: int) -> int:
                 parsed_date = datetime.strptime(date_str, '%Y-%m-%d').date()
                 parsed_dates.append(parsed_date)
             except ValueError as e:
-                print(f"⚠ Error parsing date '{date_str}': {e}")
+                logger.warning(f"Error parsing date '{date_str}': {e}")
                 continue
         
         if not parsed_dates:
@@ -227,7 +243,7 @@ def calculate_current_streak(deck_id: int) -> int:
         return streak_days
     
     except Exception as e:
-        print(f"✗ Error calculating streak for deck {deck_id}: {e}")
+        logger.error(f"Error calculating streak for deck {deck_id}: {e}")
         return 0
 
 
@@ -265,54 +281,81 @@ def get_review_stats_for_deck(deck_id: int, days: int = 30) -> dict:
             return {}
         
         # Use parameterized query with placeholders (prevent SQL injection)
-        placeholders = ",".join("?" * len(valid_card_ids))
+        # Chunk the IDs to avoid SQLite limit (999 variables)
+        total_reviews = 0
+        new_cards = 0
+        study_time_minutes = 0.0
+        last_review_id = 0
+        today_reviews = 0
+        total_ease_sum = 0
+        count_with_ease = 0
+        chunk_size = 999
         
-        # Query review log with parameterized values
-        query = f"""
-            SELECT 
-                COUNT(*) as total_reviews,
-                SUM(CASE WHEN type = 0 THEN 1 ELSE 0 END) as new_cards,
-                AVG(ease) as average_ease,
-                SUM(time) / 60000 as study_time_minutes,
-                MAX(id) as last_review_id
-            FROM revlog
-            WHERE cid IN ({placeholders})
-            AND id >= ?
-        """
+        for i in range(0, len(valid_card_ids), chunk_size):
+            chunk = valid_card_ids[i:i + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            
+            # Query review log with parameterized values
+            query = f"""
+                SELECT 
+                    COUNT(*) as total_reviews,
+                    SUM(CASE WHEN type = 0 THEN 1 ELSE 0 END) as new_cards,
+                    SUM(time) / 60000.0 as study_time_minutes,
+                    MAX(id) as last_review_id,
+                    SUM(ease) as ease_sum,
+                    COUNT(ease) as ease_count
+                FROM revlog
+                WHERE cid IN ({placeholders})
+                AND id >= ?
+            """
+            res = mw.col.db.first(query, *chunk, cutoff_time)
+            if res:
+                total_reviews += res[0] or 0
+                new_cards += res[1] or 0
+                study_time_minutes += res[2] or 0.0
+                if res[3] and res[3] > last_review_id:
+                    last_review_id = res[3]
+                total_ease_sum += res[4] or 0
+                count_with_ease += res[5] or 0
+            
+            # Query for today's reviews
+            today_query = f"""
+                SELECT COUNT(*) as today_reviews
+                FROM revlog
+                WHERE cid IN ({placeholders})
+                AND id >= ?
+            """
+            today_res = mw.col.db.first(today_query, *chunk, today_cutoff)
+            if today_res:
+                today_reviews += today_res[0] or 0
         
-        result = mw.col.db.first(query, *valid_card_ids, cutoff_time)
-        
-        # Query for today's reviews
-        today_query = f"""
-            SELECT COUNT(*) as today_reviews
-            FROM revlog
-            WHERE cid IN ({placeholders})
-            AND id >= ?
-        """
-        today_result = mw.col.db.first(today_query, *valid_card_ids, today_cutoff)
-        
-        if not result:
+        if total_reviews == 0 and today_reviews == 0:
             return {}
+        
+        # Calculate average ease
+        average_ease = 0
+        if count_with_ease > 0:
+            average_ease = round(total_ease_sum / count_with_ease, 2)
         
         # Parse last study date
         last_study_date = None
-        if result[4]:
+        if last_review_id > 0:
             try:
-                last_study_date = datetime.fromtimestamp(result[4] / 1000).isoformat()
+                last_study_date = datetime.fromtimestamp(last_review_id / 1000).isoformat()
             except (ValueError, OSError) as e:
-                print(f"Warning: Error converting timestamp {result[4]}: {e}")
+                logger.warning(f"Error converting timestamp {last_review_id}: {e}")
         
         return {
-            'total_reviews': result[0] or 0,
-            'new_cards': result[1] or 0,
-            'average_ease': round(result[2] or 0, 2),
-            'study_time_minutes': round(result[3] or 0, 2),
+            'total_reviews': total_reviews,
+            'new_cards': new_cards,
+            'average_ease': average_ease,
+            'study_time_minutes': round(study_time_minutes, 2),
             'last_study_date': last_study_date,
-            'total_reviews_today': today_result[0] if today_result else 0
+            'total_reviews_today': today_reviews
         }
         
     except Exception as e:
-        print(f"X Error getting review stats for deck {deck_id}: {e}")
+        logger.error(f"Error getting review stats for deck {deck_id}: {e}")
         return {}
 
 
@@ -335,12 +378,12 @@ def clean_deleted_decks():
         
         if not deck_exists(anki_deck_id):
             decks_to_remove.append(deck_id)
-            print(f"⚠ Deck {deck_id} (Anki ID: {anki_deck_id}) marked for cleanup")
+            logger.warning(f"Deck {deck_id} (Anki ID: {anki_deck_id}) marked for cleanup")
     
     # Remove tracked decks
     for deck_id in decks_to_remove:
         config.remove_downloaded_deck(deck_id)
-        print(f"✓ Removed deck {deck_id} from tracking")
+        logger.info(f"Removed deck {deck_id} from tracking")
     
     return len(decks_to_remove)
 
@@ -372,7 +415,7 @@ def clean_deleted_backend_decks():
         result = api.browse_decks(category="subscribed")
         
         if not result.get('success') and 'decks' not in result:
-            print("⚠ Could not verify decks with server")
+            logger.warning("Could not verify decks with server")
             return 0
         
         server_decks = result.get('decks', [])
@@ -382,18 +425,18 @@ def clean_deleted_backend_decks():
         decks_to_remove = []
         for deck_id in downloaded_decks.keys():
             if deck_id not in server_deck_ids:
-                print(f"⚠ Deck {deck_id} not found on server, marking for cleanup")
+                logger.warning(f"Deck {deck_id} not found on server, marking for cleanup")
                 decks_to_remove.append(deck_id)
         
         # Remove stale entries
         for deck_id in decks_to_remove:
             config.remove_downloaded_deck(deck_id)
-            print(f"✓ Removed server-deleted deck {deck_id} from local config")
+            logger.info(f"Removed server-deleted deck {deck_id} from local config")
         
         return len(decks_to_remove)
     
     except Exception as e:
-        print(f"⚠ Backend deck cleanup check failed (non-critical): {e}")
+        logger.error(f"Backend deck cleanup check failed (non-critical): {e}")
         return 0
 
 
@@ -416,31 +459,31 @@ def sync_progress():
         raise Exception("No access token found. Please login again.")
     
     set_access_token(token)
-    print(f"✓ Access token set for sync")
+    logger.info("Access token set for sync")
     
     try:
         # Clean up deleted decks first (local Anki check)
         cleaned = clean_deleted_decks()
         if cleaned > 0:
-            print(f"✓ Cleaned up {cleaned} deleted deck(s) from tracking")
+            logger.info(f"Cleaned up {cleaned} deleted deck(s) from tracking")
         
         # Also clean up decks deleted from backend
         backend_cleaned = clean_deleted_backend_decks()
         if backend_cleaned > 0:
-            print(f"✓ Cleaned up {backend_cleaned} server-deleted deck(s) from tracking")
+            logger.info(f"Cleaned up {backend_cleaned} server-deleted deck(s) from tracking")
         
         # Get progress data
         progress_data = get_progress_data()
         
         if not progress_data:
-            print("ℹ No decks to sync")
+            logger.info("No decks to sync")
             return {
                 'success': True,
                 'message': 'No decks to sync',
                 'synced_count': 0
             }
         
-        print(f"Syncing progress for {len(progress_data)} deck(s)...")
+        logger.info(f"Syncing progress for {len(progress_data)} deck(s)...")
         
         # Sync each deck individually using v3.0 format
         success_count = 0
@@ -458,26 +501,26 @@ def sync_progress():
                     last_result = result
                 else:
                     fail_count += 1
-                    print(f"⚠ Sync returned: {result}")
+                    logger.warning(f"Sync returned: {result}")
             except Exception as e:
                 fail_count += 1
-                print(f"✗ Failed to sync deck {deck_progress.get('deck_id', 'unknown')}: {e}")
+                logger.error(f"Failed to sync deck {deck_progress.get('deck_id', 'unknown')}: {e}")
         
-        print(f"✓ Progress synced: {success_count} succeeded, {fail_count} failed")
+        logger.info(f"Progress synced: {success_count} succeeded, {fail_count} failed")
         
         return last_result or {'success': success_count > 0, 'synced_count': success_count}
     
     except AnkiPHAPIError as e:
         if e.status_code == 401:
-            print(f"✗ Sync failed: Session expired")
+            logger.error(f"Sync failed: Session expired")
             config.clear_tokens()  # Clear expired tokens
             raise Exception("Session expired. Please login again.")
         else:
-            print(f"✗ Sync failed: {e}")
+            logger.error(f"Sync failed: {e}")
             raise Exception(f"Sync failed: {str(e)}")
     
     except Exception as e:
-        print(f"✗ Sync progress error: {e}")
+        logger.error(f"Sync progress error: {e}")
         raise
 
 
@@ -508,9 +551,9 @@ def auto_sync_if_needed():
     
     try:
         sync_progress()
-        print("OK Auto-sync completed")
+        logger.info("Auto-sync completed")
     except Exception as e:
-        print(f"X Auto-sync failed (non-critical): {e}")
+        logger.error(f"Auto-sync failed (non-critical): {e}")
 
 
 def sync_deck_progress(deck_id: str) -> dict:
@@ -578,7 +621,7 @@ def sync_deck_progress(deck_id: str) -> dict:
         })
         
         if result and result.get('success'):
-            print(f"OK Synced progress for deck {deck_id}")
+            logger.info(f"Synced progress for deck {deck_id}")
         
         return result
         

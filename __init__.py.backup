@@ -1,0 +1,230 @@
+"""
+AnkiPH Anki Addon
+v4.0.0 - Subscription-based deck sync for Philippine bar exam prep
+"""
+
+from aqt import mw, gui_hooks
+from aqt.qt import QAction
+from aqt.utils import showInfo, tooltip
+import threading
+
+
+# ============================================================================
+# GLOBALS
+# ============================================================================
+
+_dialog = None  # Singleton dialog instance
+_dialog_lock = threading.Lock()
+_initialized = False
+
+# Lazy-loaded modules (import on first use)
+logger = None
+config = None
+update_checker = None
+
+
+# ============================================================================
+# INITIALIZATION
+# ============================================================================
+
+def _init():
+    """Load dependencies lazily on first menu click"""
+    global logger, config, update_checker, _initialized
+    
+    if _initialized:
+        return True
+    
+    try:
+        from .logger import logger as _log
+        from .config import config as _cfg
+        from .update_checker import update_checker as _upd
+        from .api_client import set_access_token
+        from .constants import ADDON_VERSION
+        
+        logger, config, update_checker = _log, _cfg, _upd
+        
+        # Restore auth token if logged in
+        if token := config.get_access_token():
+            set_access_token(token)
+        
+        logger.info(f"AnkiPH v{ADDON_VERSION} ready")
+        _initialized = True
+        return True
+        
+    except Exception as e:
+        # Log full traceback for debugging
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"✗ AnkiPH failed to load:\n{error_detail}")
+        return False  # Caller decides whether to show UI error
+
+
+# ============================================================================
+# MENU ACTION
+# ============================================================================
+
+def _on_menu_click(*_):
+    """Handle menu bar click: show login or main dialog"""
+    if not _init():
+        # Only show error dialog on explicit user action
+        showInfo(
+            "AnkiPH failed to load.\n\n"
+            "Possible causes:\n"
+            "• Missing addon files\n"
+            "• Corrupted installation\n\n"
+            "Please reinstall from AnkiWeb."
+        )
+        return
+    
+    try:
+        from .ui.login_dialog import show_login_dialog
+        
+        if config.is_logged_in():
+            _show_dialog()
+        elif show_login_dialog(mw):
+            _show_dialog()
+            
+    except Exception as e:
+        showInfo(f"Error: {e}")
+        logger and logger.exception("Menu click failed")
+
+
+# ============================================================================
+# UTILITIES
+# ============================================================================
+
+def _run_background(target, name):
+    """Launch background thread with consistent settings"""
+    threading.Thread(
+        target=target,
+        daemon=True,
+        name=f"AnkiPH-{name}"
+    ).start()
+
+
+# ============================================================================
+# DIALOG MANAGEMENT
+# ============================================================================
+
+def _show_dialog():
+    """Show main dialog (singleton, thread-safe)"""
+    global _dialog
+    
+    with _dialog_lock:
+        # Reuse if already open
+        if _dialog and not _dialog.isHidden():
+            _dialog.raise_()
+            _dialog.activateWindow()
+            return
+        
+        try:
+            from .ui.main_dialog import AnkiPHMainDialog
+            _dialog = AnkiPHMainDialog(mw)
+            _dialog.finished.connect(_on_dialog_close)
+            _dialog.show()
+            
+        except Exception as e:
+            showInfo(f"Dialog error: {e}")
+            logger and logger.exception("Dialog creation failed")
+            _dialog = None  # Ensure cleanup on failure
+
+
+def _on_dialog_close():
+    """Cleanup after dialog closes, sync progress in background"""
+    global _dialog
+    _dialog = None
+    
+    if config and config.is_logged_in():
+        _run_background(_sync_progress, "Sync")
+
+
+def _sync_progress():
+    """Background: Sync study progress to server"""
+    try:
+        from . import sync
+        from .api_client import set_access_token
+        
+        # Thread-safe read of token (config handles locking internally)
+        if token := config.get_access_token():
+            set_access_token(token)
+            sync.sync_progress()
+            logger and logger.info("Progress synced")
+            
+    except Exception as e:
+        logger and logger.warning(f"Sync failed: {e}")
+
+
+# ============================================================================
+# STARTUP HOOK
+# ============================================================================
+
+def _on_startup():
+    """Auto-check for deck updates on Anki launch"""
+    if not _init() or not config.is_logged_in():
+        return
+    
+    _run_background(_check_updates, "Startup")
+
+
+def _check_updates():
+    """Background: Check for deck updates (notify only, no auto-apply)"""
+    try:
+        updates = update_checker.check_for_updates(silent=True)
+        
+        if updates:
+            # Show notification on main thread (thread-safe)
+            mw.taskman.run_on_main(
+                lambda: tooltip(f"⚖️ AnkiPH: {len(updates)} update(s) available", period=3000)
+            )
+            # NOTE: Disabled auto_apply_updates - it was causing:
+            # 1. Empty decks being created (API returns no cards)
+            # 2. Qt crashes from mw.reset() threading issues
+            # Users can manually sync from the AnkiPH dialog instead
+            
+    except Exception as e:
+        logger and logger.warning(f"Update check failed: {e}")
+
+
+# ============================================================================
+# ANKI INTEGRATION
+# ============================================================================
+
+def _setup_menu():
+    """Add AnkiPH menu item (before Help menu)"""
+    try:
+        import sys
+        import platform
+        from .constants import ADDON_VERSION
+        
+        action = QAction("⚖️ AnkiPH", mw)
+        action.triggered.connect(_on_menu_click)
+        
+        mw.form.menubar.insertAction(
+            mw.form.menuHelp.menuAction(), 
+            action
+        )
+        
+        # Health logging
+        print(
+            f"✓ AnkiPH v{ADDON_VERSION} loaded\n"
+            f"  Python {sys.version.split()[0]} | "
+            f"Anki {mw.appVersion if hasattr(mw, 'appVersion') else 'unknown'} | "
+            f"{platform.system()}"
+        )
+        
+    except Exception as e:
+        print(f"✗ AnkiPH menu failed: {e}")
+        showInfo(f"Failed to load AnkiPH:\n{e}")
+
+
+# ============================================================================
+# ENTRY POINT
+# ============================================================================
+
+try:
+    _setup_menu()
+    gui_hooks.main_window_did_init.append(_on_startup)
+    
+except Exception as e:
+    print(f"✗ Fatal AnkiPH error: {e}")
+    showInfo(f"AnkiPH failed to load:\n{e}")
