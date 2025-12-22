@@ -175,7 +175,8 @@ def _process_card(card_data: Dict, deck_id: int) -> bool:
     
     if existing_note:
         # Update existing
-        return not _update_note(existing_note, card_data, deck_id)  # Returns False for update
+        _update_note(existing_note, card_data, deck_id)
+        return False
     else:
         # Create new
         return _create_note(card_data, deck_id)
