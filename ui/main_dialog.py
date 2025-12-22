@@ -493,8 +493,9 @@ class AnkiPHMainDialog(QDialog):
         self.deck_list.clear()
         
         try:
-            # First, sync subscriptions from server
-            self._sync_subscriptions_from_server()
+            # DEBUG: PHASE 1 - Isolate Network Sync
+            logger.info("DEBUG: Entering load_decks (Network Sync DISABLED)")
+            # self._sync_subscriptions_from_server()
             
             downloaded_decks = config.get_downloaded_decks()
             
@@ -517,15 +518,26 @@ class AnkiPHMainDialog(QDialog):
                     except (ValueError, TypeError):
                         pass
             
-            # Get existing deck IDs in one query (if collection available)
+            # PHASE 2: Isolate Collection Access
             existing_deck_ids = set()
-            if mw.col:
-                # Optimized check: get all deck names/ids and filter
-                # This is faster than calling deck_exists loop for 10+ decks
-                all_decks_in_col = mw.col.decks.all_names_and_ids()
-                existing_deck_ids = {d.id for d in all_decks_in_col}
+            try:
+                if mw.col:
+                    logger.info("DEBUG: Accessing mw.col.decks")
+                    all_decks_in_col = mw.col.decks.all_names_and_ids()
+                    existing_deck_ids = {d.id for d in all_decks_in_col}
+                    logger.info(f"DEBUG: Found {len(existing_deck_ids)} local decks")
+            except Exception as coll_err:
+                logger.error(f"DEBUG: HIDDEN ERROR in collection access: {coll_err}")
+                # Don't fail the whole load if collection access fails
             
+            logger.info("DEBUG: Entering item loop - PRE-LOOP")
+            if not downloaded_decks:
+                logger.info("DEBUG: downloaded_decks is empty")
+            else:
+                logger.info(f"DEBUG: downloaded_decks has {len(downloaded_decks)} keys")
+
             for deck_id, deck_info in downloaded_decks.items():
+                logger.info(f"DEBUG: Iterating deck {deck_id}")
                 # Get deck name - prefer server title, fallback to Anki deck name
                 anki_deck_id = deck_info.get('anki_deck_id')
                 server_title = deck_info.get('title')
@@ -564,6 +576,7 @@ class AnkiPHMainDialog(QDialog):
             return
         
         try:
+            logger.info("DEBUG: Starting _sync_subscriptions_from_server")
             token = config.get_access_token()
             if token:
                 set_access_token(token)

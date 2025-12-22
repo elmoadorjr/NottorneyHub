@@ -36,7 +36,9 @@ def import_deck_from_json(deck_data: Dict, deck_name: str) -> int:
         raise Exception("Deck data is empty")
         
     try:
-        logger.info(f"Starting import for deck: {deck_name}")
+        import traceback
+        stack = "".join(traceback.format_stack())
+        logger.info(f"DEBUG: import_deck_from_json CALLED FOR: {deck_name}\nTRACEBACK:\n{stack}")
         
         # 1. Sync Note Types
         note_types = deck_data.get('note_types', [])

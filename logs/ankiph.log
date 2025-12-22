@@ -174,3 +174,13 @@
 2025-12-22 19:35:21 - AnkiPH - INFO - Starting import for deck: Getting Started with Anki
 2025-12-22 19:35:21 - AnkiPH - WARNING - No cards found in deck data
 2025-12-22 19:35:21 - AnkiPH - INFO - ✓ Access token set (eyJh...AdTw)
+2025-12-22 19:35:45 - AnkiPH - INFO - ✓ Access token set (eyJh...AdTw)
+2025-12-22 20:50:16 - AnkiPH - INFO - ✓ Access token set (eyJh...AdTw)
+2025-12-22 20:50:16 - AnkiPH - INFO - AnkiPH v4.0.0 ready
+2025-12-22 20:50:16 - AnkiPH - INFO - DEBUG: Entering load_decks (Network Sync DISABLED)
+2025-12-22 20:50:16 - AnkiPH - INFO - DEBUG: Accessing mw.col.decks
+2025-12-22 20:50:16 - AnkiPH - INFO - DEBUG: Found 1788 local decks
+2025-12-22 20:50:38 - AnkiPH - INFO - ✓ Access token set (eyJh...AdTw)
+2025-12-22 20:50:42 - AnkiPH - INFO - Refreshing expired access token...
+2025-12-22 20:50:44 - AnkiPH - INFO - ✓ Token refreshed successfully
+2025-12-22 20:50:44 - AnkiPH - INFO - Token refreshed, retrying /addon-browse-decks

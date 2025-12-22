@@ -10,6 +10,7 @@ from aqt.utils import showInfo
 # Lazy-loaded
 logger = None
 config = None
+_dialog = None  # Prevent garbage collection
 _initialized = False
 
 
@@ -47,6 +48,7 @@ def _on_menu_click(*_):
     if not _init():
         return
     
+    global _dialog
     try:
         # Check login first
         if not config.is_logged_in():
@@ -57,8 +59,9 @@ def _on_menu_click(*_):
         # Now show main dialog
         from .ui.main_dialog import AnkiPHMainDialog
         
-        dialog = AnkiPHMainDialog(mw)
-        dialog.show()
+        # Keep global reference to prevent garbage collection crash
+        _dialog = AnkiPHMainDialog(mw)
+        _dialog.show()
         
     except Exception as e:
         import traceback
