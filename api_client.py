@@ -20,10 +20,20 @@ from .config import config
 
 from .logger import logger
 try:
-    from .constants import COLLECTION_URL, PREMIUM_URL
+    from .constants import (
+        COLLECTION_URL, PREMIUM_URL, 
+        API_BATCH_SIZE, API_MAX_BATCH_SIZE, API_MIN_BATCH_SIZE,
+        SYNC_TIMEOUT_SECONDS, DOWNLOAD_TIMEOUT_SECONDS,
+        TARGET_REQUEST_DURATION_MIN, TARGET_REQUEST_DURATION_MAX,
+        DEFAULT_MAX_RETRIES, MIN_TOKEN_LENGTH
+    )
 except ImportError:
     COLLECTION_URL = "https://ankiph.lovable.app/collection"
     PREMIUM_URL = "https://ankiph.lovable.app/subscription"
+    # Fallbacks
+    API_BATCH_SIZE = 500
+    SYNC_TIMEOUT_SECONDS = 30
+    MIN_TOKEN_LENGTH = 20
 
 API_BASE = "https://ladvckxztcleljbiomcf.supabase.co/functions/v1"
 
@@ -185,7 +195,8 @@ class ApiClient:
         return f"{self.base_url}/{path}"
 
     def post(self, path: str, json_body: Optional[Dict[str, Any]] = None, 
-             require_auth: bool = True, timeout: int = 30, max_retries: int = 3) -> Any:
+             require_auth: bool = True, timeout: int = SYNC_TIMEOUT_SECONDS, 
+             max_retries: int = DEFAULT_MAX_RETRIES) -> Any:
         """Make POST request to API with exponential backoff and localized token refresh"""
         url = self._full_url(path)
         headers = self._headers(include_auth=require_auth)
@@ -215,7 +226,7 @@ class ApiClient:
                     try:
                         refresh_token = config.get_refresh_token()
                         if refresh_token:
-                            new_tokens = self.refresh_token(refresh_token)
+                            new_tokens = self.refresh_access_token(refresh_token)
                             
                             if new_tokens and new_tokens.get("access_token"):
                                 self.access_token = new_tokens["access_token"]
@@ -231,6 +242,12 @@ class ApiClient:
                                 logger.warning("Refresh returned no tokens. Stopping retry.")
                     except Exception as refresh_err:
                         logger.error(f"Token refresh failed: {refresh_err}")
+                        # Consider adding a callback for UI notification
+                        if hasattr(self, '_on_refresh_failed'):
+                            try:
+                                self._on_refresh_failed(str(refresh_err))
+                            except Exception:
+                                pass
                 
                 # Don't retry auth errors (401, 403) if refresh failed or not applicable
                 if e.status_code and e.status_code in (401, 403):
@@ -340,6 +357,29 @@ class ApiClient:
                 return data
                 
         except _urllib_error.HTTPError as he:
+            status_code = getattr(he, "code", 0)
+            
+            # Handle rate limiting first (429)
+            if status_code == 429:
+                retry_after = 60
+                try:
+                    retry_after = int(he.headers.get('Retry-After', 60))
+                except (ValueError, TypeError, AttributeError):
+                    pass
+                
+                try:
+                    body = he.read()
+                    parsed = json.loads(body.decode("utf-8"))
+                except Exception:
+                    parsed = None
+                
+                raise AnkiPHRateLimitError(
+                    f"Rate limit exceeded. Retry in {retry_after} seconds.",
+                    retry_after=retry_after,
+                    details=parsed
+                )
+
+            # Handle other errors
             try:
                 body = he.read()
                 parsed = json.loads(body.decode("utf-8"))
@@ -348,23 +388,9 @@ class ApiClient:
                 parsed = None
                 err_msg = None
             
-            # Handle 429 in HTTPError context if needed (urllib raises HTTPError for 429)
-            if getattr(he, "code", 0) == 429:
-                retry_after = 60
-                try:
-                    retry_after = int(he.headers.get('Retry-After', 60))
-                except (ValueError, TypeError, AttributeError):
-                    pass
-
-                raise AnkiPHRateLimitError(
-                    f"Rate limit exceeded. Retry in {retry_after} seconds.",
-                    retry_after=retry_after,
-                    details=parsed
-                )
-            
             raise AnkiPHAPIError(
-                err_msg or f"HTTP {getattr(he, 'code', 'error')}", 
-                status_code=getattr(he, "code", None), 
+                err_msg or f"HTTP {status_code}", 
+                status_code=status_code, 
                 details=parsed or str(he)
             ) from he
             
@@ -384,7 +410,7 @@ class ApiClient:
             require_auth=False
         )
 
-    def refresh_token(self, refresh_token: str) -> Dict[str, Any]:
+    def refresh_access_token(self, refresh_token: str) -> Dict[str, Any]:
         """Refresh access token"""
         return self.post(
             "/addon-refresh-token", 
@@ -631,7 +657,7 @@ class ApiClient:
                      last_change_id: Optional[str] = None,
                      full_sync: bool = False,
                      offset: int = 0,
-                     limit: int = 1000) -> Any:
+                     limit: int = API_BATCH_SIZE) -> Any:
         """
         Pull publisher changes since last sync
         
@@ -689,12 +715,7 @@ class ApiClient:
         latest_change_id = None
         total_cards = 0
         offset = 0
-        limit = 1000  # Initial batch size
-        
-        # Adaptive batch sizing (v4.1)
-        # Aim for requests that take ~3-5 seconds
-        TARGET_DURATION_MIN = 2.0
-        TARGET_DURATION_MAX = 5.0
+        limit = API_BATCH_SIZE  # Initial batch size
         
         while True:
             start_time = time.time()
@@ -716,13 +737,13 @@ class ApiClient:
             # Adjust batch size based on duration for next request
             # Only adjust if we got a full batch (otherwise connection speed isn't the bottleneck)
             if len(cards) >= limit:
-                if duration > TARGET_DURATION_MAX and limit > 200:
+                if duration > TARGET_REQUEST_DURATION_MAX and limit > API_MIN_BATCH_SIZE:
                     old_limit = limit
-                    limit = max(200, int(limit * 0.7))
+                    limit = max(API_MIN_BATCH_SIZE, int(limit * 0.85))  # Less aggressive reduction
                     logger.info(f"Diff sync too slow ({duration:.2f}s), reducing batch: {old_limit} -> {limit}")
-                elif duration < TARGET_DURATION_MIN and limit < 5000:
+                elif duration < TARGET_REQUEST_DURATION_MIN and limit < API_MAX_BATCH_SIZE:
                     old_limit = limit
-                    limit = min(5000, int(limit * 1.5))
+                    limit = min(API_MAX_BATCH_SIZE, int(limit * 1.3))  # More conservative growth
                     logger.info(f"Diff sync fast ({duration:.2f}s), increasing batch: {old_limit} -> {limit}")
             
             all_cards.extend(cards)
@@ -971,6 +992,62 @@ class ApiClient:
         return self.post("/addon-pull-changes", json_body={"deck_id": deck_id, "full_sync": True})
 
     # === ADMIN ENDPOINTS (NEW) ===
+
+    def _batch_upload_data(self, endpoint: str, data_key: str, items: List[Dict], 
+                          extra_body: Dict = None, batch_size: int = API_BATCH_SIZE) -> Dict[str, Any]:
+        """
+        Helper to upload data in batches.
+        
+        Args:
+            endpoint: API endpoint
+            data_key: Key for the list of items in the body (e.g., "cards", "changes")
+            items: List of items to upload
+            extra_body: Additional fields for the body
+            batch_size: Number of items per batch
+            
+        Returns:
+            Aggregated result dictionary
+        """
+        if not items:
+            return {"success": True, "processed": 0}
+            
+        total = len(items)
+        chunk_size = min(batch_size, API_MAX_BATCH_SIZE)
+        
+        logger.info(f"Starting batch upload: {total} items to {endpoint} (batch size: {chunk_size})")
+        
+        aggregated_stats = {"processed": 0, "success": True}
+        
+        for i in range(0, total, chunk_size):
+            batch = items[i:i+chunk_size]
+            body = {data_key: batch}
+            if extra_body:
+                body.update(extra_body)
+                
+            try:
+                # Use longer timeout for batches
+                result = self.post(endpoint, json_body=body, timeout=int(SYNC_TIMEOUT_SECONDS * 2))
+                
+                # Aggregate stats if returned keys are numeric
+                if isinstance(result, dict):
+                    for k, v in result.items():
+                        if isinstance(v, (int, float)) and not isinstance(v, bool):
+                            aggregated_stats[k] = aggregated_stats.get(k, 0) + v
+                        elif k not in aggregated_stats and k != "success":
+                            aggregated_stats[k] = v
+                            
+                aggregated_stats["processed"] += len(batch)
+                logger.debug(f"Uploaded batch {i//chunk_size + 1}: {len(batch)} items")
+                
+            except Exception as e:
+                logger.error(f"Batch upload failed at offset {i}: {e}")
+                return {
+                    "success": False, 
+                    "error": str(e), 
+                    "processed": aggregated_stats["processed"]
+                }
+                
+        return aggregated_stats
     
     def admin_push_changes(self, deck_id: str, changes: List[Dict], version: str,
                            version_notes: Optional[str] = None,
@@ -989,6 +1066,20 @@ class ApiClient:
         Returns:
             {"success": true, "cards_added": 0, "cards_modified": 50, "new_version": "2.2.0"}
         """
+        if len(changes) > API_BATCH_SIZE:
+            extra_body = {"deck_id": deck_id, "version": version}
+            if version_notes:
+                extra_body["version_notes"] = version_notes
+                
+            return self._batch_upload_data(
+                "/addon-admin-push-changes", 
+                "changes", 
+                changes, 
+                extra_body=extra_body,
+                batch_size=API_BATCH_SIZE
+            )
+            
+        # Single request for small payloads
         body = {"deck_id": deck_id, "changes": changes, "version": version}
         if version_notes:
             body["version_notes"] = version_notes
@@ -1015,6 +1106,65 @@ class ApiClient:
         Returns:
             {"success": true, "deck_id": "uuid", "cards_imported": 500, "version": "1.0.0"}
         """
+        if len(cards) > API_BATCH_SIZE:
+            extra_body = {
+                "version": version,
+                "clear_existing": clear_existing
+            }
+            if deck_id:
+                extra_body["deck_id"] = deck_id
+            if deck_title:
+                extra_body["deck_title"] = deck_title
+            if version_notes:
+                extra_body["version_notes"] = version_notes
+                
+            # Note: For import, ideally we only clear on the FIRST batch
+            # But the API might handle it. Assuming API appends if clear_existing=False?
+            # Safe approach: pass clear_existing only on first batch?
+            # For simplicity, we assume API handles overwrite or we let the user handle it.
+            # actually, if clear_existing is True, we must be careful not to clear on subsequent batches.
+            
+            # This logic is tricky. If clear_existing=True, valid only for first batch.
+            # Let's handle first batch specially if needed.
+            # A generic batch uploader might not suffice if side-effects differ per batch.
+            
+            # Custom batch logic for import to handle clear_existing
+            items = cards
+            total = len(items)
+            chunk_size = API_BATCH_SIZE
+            aggregated_stats = {"processed": 0, "success": True}
+            
+            for i in range(0, total, chunk_size):
+                batch = items[i:i+chunk_size]
+                
+                # Only clear on first batch
+                current_clear = clear_existing and (i == 0)
+                
+                body = {
+                    "cards": batch,
+                    "version": version,
+                    "clear_existing": current_clear
+                }
+                if deck_id:
+                    body["deck_id"] = deck_id
+                if deck_title:
+                    body["deck_title"] = deck_title
+                if version_notes and i == 0:
+                    body["version_notes"] = version_notes
+                    
+                try:
+                    result = self.post("/addon-admin-import-deck", json_body=body, timeout=timeout)
+                    # Aggregate (simplified)
+                    aggregated_stats["processed"] += len(batch)
+                    if isinstance(result, dict) and result.get("deck_id"):
+                        aggregated_stats["deck_id"] = result.get("deck_id")
+                except Exception as e:
+                    logger.error(f"Import batch failed: {e}")
+                    return {"success": False, "error": str(e)}
+            
+            return aggregated_stats
+
+        # Single request
         body = {
             "cards": cards,
             "version": version,
@@ -1253,12 +1403,17 @@ def set_access_token(token: Optional[str]) -> None:
             logger.error("Invalid token type - must be string")
             return
         
-        if len(token) < 20:
-            logger.warning("Token appears too short - may be invalid")
+        if len(token) < MIN_TOKEN_LENGTH:
+            logger.warning("Token validation: token appears invalid")
             # Still set it, but warn
         
         api.access_token = token
-        logger.info("✓ Access token set")
+        # Secure logging
+        if len(token) > 10:
+            masked = f"{token[:4]}...{token[-4:]}"
+            logger.info(f"✓ Access token set ({masked})")
+        else:
+            logger.info("✓ Access token set")
     else:
         api.access_token = None
         logger.info("✓ Access token cleared")
@@ -1280,8 +1435,8 @@ def ensure_valid_token() -> bool:
     expires_at = config.get_token_expiry()
     
     # Needs explicit import or check if _is_token_expired is available in scope
-    # It is defined above in this file
-    if not _is_token_expired(expires_at):
+    # It is defined above in this file as check_token_expiry
+    if not check_token_expiry(expires_at):
         set_access_token(token)
         return True
         
@@ -1290,7 +1445,7 @@ def ensure_valid_token() -> bool:
     if refresh_token:
         try:
             logger.info("Access token expired, attempting refresh...")
-            result = api.refresh_token(refresh_token)
+            result = api.refresh_access_token(refresh_token)
             if result.get('success'):
                 new_token = result.get('access_token')
                 new_refresh = result.get('refresh_token', refresh_token)
