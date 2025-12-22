@@ -6,26 +6,26 @@ Version: 3.3.0 - Subscription-only model
 
 # Addon Info
 ADDON_NAME = "AnkiPH"
-ADDON_VERSION = "3.3.0"
+ADDON_VERSION = "3.3.2"
 
 # Base URLs - Use primary domain for all features
-BASE_URL = "https://nottorney.com"
+BASE_URL = "https://ankiph.lovable.app"
 
 # Page URLs (derived from BASE_URL for consistency)
 HOMEPAGE_URL = BASE_URL
-REGISTER_URL = f"{BASE_URL}/register"
-FORGOT_PASSWORD_URL = f"{BASE_URL}/forgot-password"
+REGISTER_URL = f"{BASE_URL}/auth"
+FORGOT_PASSWORD_URL = f"{BASE_URL}/auth"
 TERMS_URL = f"{BASE_URL}/terms"
 PRIVACY_URL = f"{BASE_URL}/privacy"
-PLANS_URL = f"{BASE_URL}/pricing"
-DOCS_URL = f"{BASE_URL}/docs"
+PLANS_URL = f"{BASE_URL}/subscription"
+DOCS_URL = f"{BASE_URL}/ankiph"
 HELP_URL = f"{BASE_URL}/help"
-CHANGELOG_URL = f"{BASE_URL}/changelog"
-COMMUNITY_URL = f"{BASE_URL}/community"
+CHANGELOG_URL = f"{BASE_URL}/help"
+COMMUNITY_URL = f"{BASE_URL}/help"
 
 # Subscription URLs (v3.3 - subscription-only model)
 COLLECTION_URL = f"{BASE_URL}/collection"
-PREMIUM_URL = f"{BASE_URL}/settings?tab=subscription"
+PREMIUM_URL = f"{BASE_URL}/subscription"
 SUBSCRIBE_URL = PREMIUM_URL  # Alias for subscription page
 
 # Limits and Magic Numbers (v4.0 - centralized)

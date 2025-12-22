@@ -4,7 +4,7 @@ ENHANCED: Added update checking, notifications, and AnkiHub-parity endpoints
 ENHANCED: Added subscription-only access support (subscriber, free tier)
 ENHANCED: Added subscription management and v3.0 API alignment
 FIXED: Token validation, better error handling, no retry on auth errors
-Version: 3.3.1
+Version: 3.3.2
 """
 
 from __future__ import annotations
@@ -22,8 +22,8 @@ from .logger import logger
 try:
     from .constants import COLLECTION_URL, PREMIUM_URL
 except ImportError:
-    COLLECTION_URL = "https://nottorney.com/collection"
-    PREMIUM_URL = "https://nottorney.com/premium"
+    COLLECTION_URL = "https://ankiph.lovable.app/collection"
+    PREMIUM_URL = "https://ankiph.lovable.app/subscription"
 
 API_BASE = "https://ladvckxztcleljbiomcf.supabase.co/functions/v1"
 

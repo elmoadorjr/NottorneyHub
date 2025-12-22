@@ -1,6 +1,6 @@
 """
 AnkiPH Anki Addon - Simplified Version
-PyQt6 Compatible - v3.3.0
+PyQt6 Compatible - v3.3.2
 SIMPLIFIED: Subscription-only model, auto-sync on startup
 """
 
