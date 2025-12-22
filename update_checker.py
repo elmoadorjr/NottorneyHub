@@ -9,7 +9,7 @@ from aqt import mw
 from aqt.utils import showInfo, tooltip
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
-from .api_client import api, AnkiPHAPIError, set_access_token
+from .api_client import api, AnkiPHAPIError, set_access_token, ensure_valid_token
 from .config import config
 from .logger import logger
 
@@ -74,26 +74,10 @@ class UpdateChecker:
                 return None
             
             # Try to refresh token if needed
-            token = config.get_access_token()
-            refresh_token = config.get_refresh_token()
-            
-            if refresh_token:
-                try:
-                    result = api.refresh_token(refresh_token)
-                    if result.get('success'):
-                        new_token = result.get('access_token')
-                        new_refresh = result.get('refresh_token', refresh_token)
-                        expires_at = result.get('expires_at')
-                        
-                        if new_token:
-                            config.save_tokens(new_token, new_refresh, expires_at)
-                            token = new_token
-                            logger.info("Token refreshed successfully for update check")
-                except Exception as e:
-                    logger.warning(f"Token refresh failed (will try with existing): {e}")
-            
-            # Set access token
-            set_access_token(token)
+            if not ensure_valid_token():
+                if not silent:
+                    showInfo("Please login first to check for updates.")
+                return None
             
             if not silent:
                 tooltip("Checking for deck updates...", period=2000)

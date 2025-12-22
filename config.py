@@ -188,6 +188,10 @@ class Config:
         """Get the current refresh token"""
         return self._get_config().get('refresh_token')
     
+    def get_token_expiry(self):
+        """Get the access token expiry timestamp"""
+        return self._get_config().get('expires_at')
+    
     def set_access_token(self, token):
         """Set the access token"""
         cfg = self._get_config()

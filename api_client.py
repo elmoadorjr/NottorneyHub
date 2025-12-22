@@ -238,59 +238,53 @@ class ApiClient:
     def _post_with_requests(self, url: str, headers: Dict[str, str], 
                            json_body: Optional[Dict[str, Any]], timeout: int) -> Any:
         """POST using requests library"""
+        """POST using requests library"""
         try:
-            resp = requests.post(url, headers=headers, json=json_body or {}, timeout=timeout)
-        except requests.Timeout:
-            raise AnkiPHAPIError("Request timed out. Please check your internet connection.")
-        except requests.ConnectionError:
-            raise AnkiPHAPIError("Connection failed. Please check your internet connection.")
-        except Exception as e:
-            raise AnkiPHAPIError(f"Network error: {e}") from e
+            with requests.post(url, headers=headers, json=json_body or {}, timeout=timeout, stream=False) as resp:
+                # Handle Rate Limiting (429) inside context
+                if resp.status_code == 429:
+                    retry_after = 60
+                    try:
+                        retry_after = int(resp.headers.get('Retry-After', 60))
+                    except (ValueError, TypeError):
+                        pass
+                        
+                    try:
+                        data = resp.json()
+                        err_msg = data.get("error", "Rate limit exceeded")
+                    except Exception:
+                        data = None
+                        err_msg = "Rate limit exceeded"
+                        
+                    raise AnkiPHRateLimitError(
+                        f"{err_msg}. Retry in {retry_after} seconds.", 
+                        retry_after=retry_after,
+                        details=data
+                    )
 
-        # Handle Rate Limiting (429)
-        if resp.status_code == 429:
-            retry_after = 60
-            try:
-                retry_after = int(resp.headers.get('Retry-After', 60))
-            except (ValueError, TypeError):
-                pass
-                
-            try:
-                data = resp.json()
-                err_msg = data.get("error", "Rate limit exceeded")
-            except Exception:
-                data = None
-                err_msg = "Rate limit exceeded"
-                
-            raise AnkiPHRateLimitError(
-                f"{err_msg}. Retry in {retry_after} seconds.", 
-                retry_after=retry_after,
-                details=data
-            )
+                # Parse response
+                try:
+                    data = resp.json()
+                except Exception: 
+                    text = resp.text if hasattr(resp, "text") else ""
+                    raise AnkiPHAPIError(
+                        f"Invalid response from server (HTTP {resp.status_code})", 
+                        status_code=resp.status_code, 
+                        details=text[:500]
+                    )
 
-        # Parse response
-        try:
-            data = resp.json()
-        except Exception: 
-            text = resp.text if hasattr(resp, "text") else ""
-            raise AnkiPHAPIError(
-                f"Invalid response from server (HTTP {resp.status_code})", 
-                status_code=resp.status_code, 
-                details=text[:500]
-            )
+                # Check for errors
+                if not resp.ok:
+                    err_msg = None
+                    if isinstance(data, dict):
+                        err_msg = data.get("error") or data.get("message") or data.get("detail")
+                    
+                    if not err_msg:
+                        err_msg = f"HTTP {resp.status_code} error"
+                    
+                    raise AnkiPHAPIError(err_msg, status_code=resp.status_code, details=data)
 
-        # Check for errors
-        if not resp.ok:
-            err_msg = None
-            if isinstance(data, dict):
-                err_msg = data.get("error") or data.get("message") or data.get("detail")
-            
-            if not err_msg:
-                err_msg = f"HTTP {resp.status_code} error"
-            
-            raise AnkiPHAPIError(err_msg, status_code=resp.status_code, details=data)
-
-        return data
+                return data
 
     def _post_with_urllib(self, url: str, headers: Dict[str, str], 
                          json_body: Optional[Dict[str, Any]], timeout: int) -> Any:
@@ -1235,3 +1229,50 @@ def set_access_token(token: Optional[str]) -> None:
     else:
         api.access_token = None
         logger.info("✓ Access token cleared")
+
+
+def ensure_valid_token() -> bool:
+    """
+    Ensure we have a valid access token, refreshing if needed.
+    
+    Returns:
+        True if we have a valid token (either existing or refreshed)
+    """
+    token = config.get_access_token()
+    if not token:
+        set_access_token(None)
+        return False
+        
+    # Check expiry
+    expires_at = config.get_token_expiry()
+    
+    # Needs explicit import or check if _is_token_expired is available in scope
+    # It is defined above in this file
+    if not _is_token_expired(expires_at):
+        set_access_token(token)
+        return True
+        
+    # Token expired, try refresh
+    refresh_token = config.get_refresh_token()
+    if refresh_token:
+        try:
+            logger.info("Access token expired, attempting refresh...")
+            result = api.refresh_token(refresh_token)
+            if result.get('success'):
+                new_token = result.get('access_token')
+                new_refresh = result.get('refresh_token', refresh_token)
+                new_expires = result.get('expires_at')
+                
+                if new_token:
+                    config.save_tokens(new_token, new_refresh, new_expires)
+                    set_access_token(new_token)
+                    logger.info("Token refreshed successfully")
+                    return True
+        except Exception as e:
+            logger.error(f"Token refresh failed: {e}")
+            
+    # Refresh failed or no refresh token
+    logger.warning("Token expired and refresh failed")
+    # Don't clear immediately, let API return 401? 
+    # But ensure_valid_token implies we know it's invalid.
+    return False

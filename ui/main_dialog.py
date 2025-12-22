@@ -493,6 +493,24 @@ class AnkiPHMainDialog(QDialog):
             # Import deck_exists helper
             from ..deck_importer import deck_exists
             
+            # Batch check for installed decks to avoid N+1 queries
+            all_anki_ids = []
+            for d_info in downloaded_decks.values():
+                aid = d_info.get('anki_deck_id')
+                if aid:
+                    try:
+                        all_anki_ids.append(int(aid))
+                    except (ValueError, TypeError):
+                        pass
+            
+            # Get existing deck IDs in one query (if collection available)
+            existing_deck_ids = set()
+            if mw.col:
+                # Optimized check: get all deck names/ids and filter
+                # This is faster than calling deck_exists loop for 10+ decks
+                all_decks_in_col = mw.col.decks.all_names_and_ids()
+                existing_deck_ids = {d.id for d in all_decks_in_col}
+            
             for deck_id, deck_info in downloaded_decks.items():
                 # Get deck name - prefer server title, fallback to Anki deck name
                 anki_deck_id = deck_info.get('anki_deck_id')
@@ -500,16 +518,17 @@ class AnkiPHMainDialog(QDialog):
                 deck_name = server_title or f"Deck {deck_id[:8]}"
                 is_installed = False
                 
-                if anki_deck_id and mw.col:
-                    is_installed = deck_exists(anki_deck_id)
-                    if is_installed and not server_title:
-                        try:
-                            # Use integer ID for deck lookup
-                            deck = mw.col.decks.get(int(anki_deck_id))
+                if anki_deck_id:
+                    try:
+                        aid_int = int(anki_deck_id)
+                        is_installed = aid_int in existing_deck_ids
+                        
+                        if is_installed and not server_title and mw.col:
+                            deck = mw.col.decks.get(aid_int)
                             if deck and deck['name'] != 'Default':
                                 deck_name = deck['name']
-                        except Exception:
-                            pass
+                    except (ValueError, TypeError):
+                        pass
                 
                 # Show install status in list (only show ⚠ for not installed)
                 prefix = "" if is_installed else "⚠ "

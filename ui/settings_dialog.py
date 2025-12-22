@@ -13,7 +13,7 @@ from aqt.qt import (
 from aqt import mw
 import webbrowser
 
-from ..api_client import api, set_access_token, AnkiPHAPIError
+from ..api_client import api, set_access_token, AnkiPHAPIError, ensure_valid_token
 from ..config import config
 from ..utils import escape_anki_search
 from .styles import COLORS, apply_dark_theme
@@ -24,38 +24,7 @@ from ..constants import (
 )
 
 
-def ensure_valid_token():
-    """
-    Ensure we have a valid access token, refreshing if needed.
-    Returns True if we have a valid token, False otherwise.
-    """
-    token = config.get_access_token()
-    if not token:
-        return False
-    
-    # Try to refresh if we have a refresh token
-    refresh_token = config.get_refresh_token()
-    if refresh_token:
-        try:
-            result = api.refresh_token(refresh_token)
-            if result.get('success'):
-                new_access = result.get('access_token')
-                new_refresh = result.get('refresh_token', refresh_token)
-                expires_at = result.get('expires_at')
-                
-                if new_access:
-                    config.save_tokens(new_access, new_refresh, expires_at)
-                    set_access_token(new_access)
-                    logger.info("Token refreshed successfully")
-                    return True
-        except Exception as e:
-            logger.error(f"Token refresh failed: {e}")
-    
-    # If refresh failed OR no refresh token, check if existing token is valid
-    # In this refactored version, we could add a light check here,
-    # but for now we follow the plan: if it's expired, we should know
-    set_access_token(token)
-    return True
+
 
 
 def is_auth_error(error):

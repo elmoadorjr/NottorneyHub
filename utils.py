@@ -2,6 +2,7 @@
 Utility functions for the AnkiPH addon
 Version: 1.0.1 - Fixed escaping for Anki search queries
 """
+import re
 
 
 def escape_anki_search(text: str) -> str:
@@ -55,3 +56,18 @@ def sanitize_sql_like(text: str) -> str:
     text = text.replace("_", r"\_")
     
     return text
+
+
+def strip_html(text: str) -> str:
+    """
+    Efficiently strip HTML tags from text using pre-compiled regex.
+    
+    Args:
+        text: The text containing HTML tags
+    
+    Returns:
+        Clean text without HTML tags
+    """
+    if not text:
+        return ""
+    return HTML_TAG_PATTERN.sub('', text)

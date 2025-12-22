@@ -216,14 +216,19 @@ def _fill_note_fields(note: Note, fields_data: Any) -> bool:
     """Populate note fields. Returns True if any field changed."""
     changed = False
     model_fields = mw.col.models.field_names(note.note_type())
+    # O(1) lookup
+    model_field_set = set(model_fields)
     
     # Handle dict (field_name: value)
     if isinstance(fields_data, dict):
         for fname, fval in fields_data.items():
-            if fname in model_fields:
+            if fname in model_field_set:
                 if note[fname] != fval:
                     note[fname] = fval
                     changed = True
+            else:
+                # Log warning for debugging data mismatches
+                logger.debug(f"Field '{fname}' not found in note type '{note.note_type()['name']}'")
                     
     # Handle list (values in order)
     elif isinstance(fields_data, list):
