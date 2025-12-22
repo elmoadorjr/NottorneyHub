@@ -186,11 +186,13 @@ class ApiClient:
 
     def post(self, path: str, json_body: Optional[Dict[str, Any]] = None, 
              require_auth: bool = True, timeout: int = 30, max_retries: int = 3) -> Any:
-        """Make POST request to API with exponential backoff"""
+        """Make POST request to API with exponential backoff and localized token refresh"""
         url = self._full_url(path)
         headers = self._headers(include_auth=require_auth)
 
         retries = 0
+        refresh_attempted = False
+        
         while retries <= max_retries:
             try:
                 if _HAS_REQUESTS:
@@ -206,7 +208,32 @@ class ApiClient:
                 time.sleep(wait_time)
                 retries += 1
             except AnkiPHAPIError as e:
-                # Don't retry auth errors (401, 403) - they won't succeed on retry
+                # Handle 401 Unauthorized - Attempt Refresh if not yet tried
+                if e.status_code == 401 and require_auth and not refresh_attempted:
+                    logger.info("Access token expired (401). Attempting silent refresh...")
+                    refresh_attempted = True
+                    try:
+                        refresh_token = config.get_refresh_token()
+                        if refresh_token:
+                            # Use separate client instance or direct call to avoid recursion issues if any
+                            # But since refresh_token() uses require_auth=False, it should be safe.
+                            new_tokens = self.refresh_token(refresh_token)
+                            
+                            if new_tokens and new_tokens.get("access_token"):
+                                self.access_token = new_tokens["access_token"]
+                                config.set_tokens(
+                                    self.access_token, 
+                                    new_tokens.get("refresh_token") or refresh_token
+                                )
+                                # Update headers with new token
+                                headers = self._headers(include_auth=True)
+                                logger.info("Token refreshed successfully. Retrying request...")
+                                continue
+                    except Exception as refresh_err:
+                        logger.error(f"Token refresh failed: {refresh_err}")
+                        # Fall through to standard auth failure handling
+                
+                # Don't retry auth errors (401, 403) if refresh failed or not applicable
                 if e.status_code and e.status_code in (401, 403):
                     logger.error(f"Authentication error: {e}")
                     # Clear tokens immediately on auth failure
@@ -237,7 +264,6 @@ class ApiClient:
 
     def _post_with_requests(self, url: str, headers: Dict[str, str], 
                            json_body: Optional[Dict[str, Any]], timeout: int) -> Any:
-        """POST using requests library"""
         """POST using requests library"""
         try:
             with requests.post(url, headers=headers, json=json_body or {}, timeout=timeout, stream=False) as resp:
@@ -285,6 +311,8 @@ class ApiClient:
                     raise AnkiPHAPIError(err_msg, status_code=resp.status_code, details=data)
 
                 return data
+        except Exception:
+            raise
 
     def _post_with_urllib(self, url: str, headers: Dict[str, str], 
                          json_body: Optional[Dict[str, Any]], timeout: int) -> Any:
@@ -680,9 +708,16 @@ class ApiClient:
         latest_change_id = None
         total_cards = 0
         offset = 0
-        limit = 1000  # Batch size
+        limit = 1000  # Initial batch size
+        
+        # Adaptive batch sizing (v4.1)
+        # Aim for requests that take ~3-5 seconds
+        TARGET_DURATION_MIN = 2.0
+        TARGET_DURATION_MAX = 5.0
         
         while True:
+            start_time = time.time()
+            
             result = self.pull_changes(
                 deck_id=deck_id,
                 full_sync=True,
@@ -690,10 +725,25 @@ class ApiClient:
                 limit=limit
             )
             
+            duration = time.time() - start_time
+            
             if not result.get('success'):
                 return result  # Return error
             
             cards = result.get('cards', [])
+            
+            # Adjust batch size based on duration for next request
+            # Only adjust if we got a full batch (otherwise connection speed isn't the bottleneck)
+            if len(cards) >= limit:
+                if duration > TARGET_DURATION_MAX and limit > 200:
+                    old_limit = limit
+                    limit = max(200, int(limit * 0.7))
+                    logger.info(f"Diff sync too slow ({duration:.2f}s), reducing batch: {old_limit} -> {limit}")
+                elif duration < TARGET_DURATION_MIN and limit < 5000:
+                    old_limit = limit
+                    limit = min(5000, int(limit * 1.5))
+                    logger.info(f"Diff sync fast ({duration:.2f}s), increasing batch: {old_limit} -> {limit}")
+            
             all_cards.extend(cards)
             
             # Get note types from first batch only
@@ -709,12 +759,14 @@ class ApiClient:
             logger.info(f"Fetched batch: offset={offset}, got {len(cards)} cards (total: {len(all_cards)}/{total_cards})")
             
             # Check if more cards to fetch
-            has_more = result.get('has_more', False)
-            
-            # Fallback: if no has_more flag, check if we got a full batch
-            if not has_more and len(cards) == limit:
-                # Backend didn't send has_more, but we got a full batch - try next page
-                has_more = True
+            # Robust check: use total_cards if available, otherwise check if batch is full
+            if len(all_cards) >= total_cards and total_cards > 0:
+                has_more = False
+            else:
+                has_more = result.get('has_more', False)
+                # Fallback: if backend didn't send has_more, check batch size
+                if not has_more and len(cards) == limit:
+                    has_more = True
             
             if not has_more or len(cards) == 0:
                 break

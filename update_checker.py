@@ -18,7 +18,6 @@ class UpdateChecker:
     """Handles checking for deck updates"""
     
     def __init__(self):
-        self.checking = False
         self._checking_lock = threading.Lock()
     
     def should_check_updates(self) -> bool:
@@ -58,10 +57,8 @@ class UpdateChecker:
             return None
         
         try:
-            self.checking = True
             return self._do_check_updates(silent)
         finally:
-            self.checking = False
             self._checking_lock.release()
 
     def _do_check_updates(self, silent: bool) -> Optional[Dict]:

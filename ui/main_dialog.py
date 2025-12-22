@@ -8,7 +8,7 @@ import webbrowser
 from aqt.qt import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QListWidget, QListWidgetItem, QMessageBox, Qt,
-    QWidget, QSplitter, QFrame, QCheckBox, QSizePolicy, QApplication
+    QWidget, QSplitter, QFrame, QCheckBox, QSizePolicy, QApplication, QTimer
 )
 from aqt import mw
 from aqt.utils import showInfo, tooltip
@@ -78,10 +78,11 @@ class AnkiPHMainDialog(QDialog):
             # Qt requires us to delete the layout from its parent
             old_layout.deleteLater()
         
-        # Force processing of deleteLater events before creating new layout
-        QApplication.processEvents()
-        
-        # Rebuild
+        # Schedule rebuild after current event loop processes deletion
+        QTimer.singleShot(0, self._finish_rebuild)
+    
+    def _finish_rebuild(self):
+        """Finish rebuilding the UI after cleanup"""
         self.setup_ui()
         self.apply_styles()
     

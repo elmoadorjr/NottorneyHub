@@ -21,7 +21,7 @@ class Config:
         self._config_cache = None
         self._cache_timestamp = 0
         self._cache_timeout = 1.0  # 1 second cache
-        self._cache_lock = threading.Lock()  # Thread safety
+        self._cache_lock = threading.RLock()  # Thread safety (Reentrant)
         
     def _get_config(self):
         """Get the addon config from Anki with caching and thread safety"""
