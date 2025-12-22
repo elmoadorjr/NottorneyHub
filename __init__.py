@@ -1,36 +1,21 @@
 """
-AnkiPH Anki Addon - DEBUG STEP 2
-Adding: lazy imports + menu + dialog
-NOT adding: startup hook (_on_startup)
+AnkiPH Anki Addon - DEBUG VERSION 3
+Adds back full main dialog with aggressive error catching
 """
 
-from aqt import mw, gui_hooks
+from aqt import mw
 from aqt.qt import QAction
-from aqt.utils import showInfo, tooltip
-import threading
+from aqt.utils import showInfo
 
-
-# ============================================================================
-# GLOBALS
-# ============================================================================
-
-_dialog = None
-_dialog_lock = threading.Lock()
-_initialized = False
-
-# Lazy-loaded modules
+# Lazy-loaded
 logger = None
 config = None
-update_checker = None
+_initialized = False
 
-
-# ============================================================================
-# INITIALIZATION
-# ============================================================================
 
 def _init():
-    """Load dependencies lazily on first menu click"""
-    global logger, config, update_checker, _initialized
+    """Load dependencies"""
+    global logger, config, _initialized
     
     if _initialized:
         return True
@@ -38,13 +23,11 @@ def _init():
     try:
         from .logger import logger as _log
         from .config import config as _cfg
-        from .update_checker import update_checker as _upd
-        from .api_client import set_access_token
         from .constants import ADDON_VERSION
+        from .api_client import set_access_token
         
-        logger, config, update_checker = _log, _cfg, _upd
+        logger, config = _log, _cfg
         
-        # Restore auth token if logged in
         if token := config.get_access_token():
             set_access_token(token)
         
@@ -54,115 +37,44 @@ def _init():
         
     except Exception as e:
         import traceback
-        error_detail = traceback.format_exc()
-        print(f"✗ AnkiPH failed to load:\n{error_detail}")
+        print(f"✗ AnkiPH init failed:\n{traceback.format_exc()}")
+        showInfo(f"AnkiPH failed to load:\n{e}")
         return False
 
 
-# ============================================================================
-# MENU ACTION
-# ============================================================================
-
 def _on_menu_click(*_):
-    """Handle menu bar click: show login or main dialog"""
+    """Show the main dialog with error catching"""
     if not _init():
-        showInfo(
-            "AnkiPH failed to load.\n\n"
-            "Possible causes:\n"
-            "• Missing addon files\n"
-            "• Corrupted installation\n\n"
-            "Please reinstall from AnkiWeb."
-        )
         return
     
     try:
-        from .ui.login_dialog import show_login_dialog
+        # Check login first
+        if not config.is_logged_in():
+            from .ui.login_dialog import show_login_dialog
+            if not show_login_dialog(mw):
+                return
         
-        if config.is_logged_in():
-            _show_dialog()
-        elif show_login_dialog(mw):
-            _show_dialog()
-            
+        # Now show main dialog
+        from .ui.main_dialog import AnkiPHMainDialog
+        
+        dialog = AnkiPHMainDialog(mw)
+        dialog.show()
+        
     except Exception as e:
-        showInfo(f"Error: {e}")
-        logger and logger.exception("Menu click failed")
+        import traceback
+        print(f"✗ Dialog error:\n{traceback.format_exc()}")
+        showInfo(f"Error opening dialog:\n{e}")
 
-
-# ============================================================================
-# DIALOG MANAGEMENT
-# ============================================================================
-
-def _show_dialog():
-    """Show main dialog (singleton, thread-safe)"""
-    global _dialog
-    
-    with _dialog_lock:
-        if _dialog and not _dialog.isHidden():
-            _dialog.raise_()
-            _dialog.activateWindow()
-            return
-        
-        try:
-            from .ui.main_dialog import AnkiPHMainDialog
-            _dialog = AnkiPHMainDialog(mw)
-            _dialog.finished.connect(_on_dialog_close)
-            _dialog.show()
-            
-        except Exception as e:
-            showInfo(f"Dialog error: {e}")
-            logger and logger.exception("Dialog creation failed")
-            _dialog = None
-
-
-def _on_dialog_close():
-    """Cleanup after dialog closes"""
-    global _dialog
-    _dialog = None
-    # NOTE: Disabled sync on close for debugging
-    # if config and config.is_logged_in():
-    #     _run_background(_sync_progress, "Sync")
-
-
-# ============================================================================
-# ANKI INTEGRATION (NO STARTUP HOOK)
-# ============================================================================
 
 def _setup_menu():
-    """Add AnkiPH menu item (before Help menu)"""
-    try:
-        import sys
-        import platform
-        from .constants import ADDON_VERSION
-        
-        action = QAction("⚖️ AnkiPH", mw)
-        action.triggered.connect(_on_menu_click)
-        
-        mw.form.menubar.insertAction(
-            mw.form.menuHelp.menuAction(), 
-            action
-        )
-        
-        print(
-            f"✓ AnkiPH v{ADDON_VERSION} loaded (DEBUG: no startup hook)\n"
-            f"  Python {sys.version.split()[0]} | "
-            f"Anki {mw.appVersion if hasattr(mw, 'appVersion') else 'unknown'} | "
-            f"{platform.system()}"
-        )
-        
-    except Exception as e:
-        print(f"✗ AnkiPH menu failed: {e}")
-        showInfo(f"Failed to load AnkiPH:\n{e}")
+    from .constants import ADDON_VERSION
+    action = QAction("⚖️ AnkiPH", mw)
+    action.triggered.connect(_on_menu_click)
+    mw.form.menubar.insertAction(mw.form.menuHelp.menuAction(), action)
+    print(f"✓ AnkiPH v{ADDON_VERSION} loaded (DEBUG 3)")
 
-
-# ============================================================================
-# ENTRY POINT - NO STARTUP HOOK FOR DEBUGGING
-# ============================================================================
 
 try:
     _setup_menu()
-    # NOTE: Disabled startup hook for debugging
-    # gui_hooks.main_window_did_init.append(_on_startup)
-    
 except Exception as e:
-    print(f"✗ Fatal AnkiPH error: {e}")
-    showInfo(f"AnkiPH failed to load:\n{e}")
+    print(f"✗ AnkiPH setup failed: {e}")

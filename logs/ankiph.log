@@ -114,3 +114,63 @@
 2025-12-22 16:34:17 - AnkiPH - INFO - AnkiPH v4.0.0 ready
 2025-12-22 16:34:17 - AnkiPH - INFO - ✓ Access token set (eyJh...4oY0)
 2025-12-22 16:34:20 - AnkiPH - INFO - Update check complete: 2 update(s) available
+2025-12-22 19:01:53 - AnkiPH - INFO - ✓ Access token set (eyJh...4oY0)
+2025-12-22 19:01:53 - AnkiPH - INFO - AnkiPH v4.0.0 ready
+2025-12-22 19:01:53 - AnkiPH - INFO - Access token expired, attempting refresh...
+2025-12-22 19:01:55 - AnkiPH - INFO - ✓ Access token set (eyJh...6Ntg)
+2025-12-22 19:01:55 - AnkiPH - INFO - ✓ Token refreshed successfully
+2025-12-22 19:02:00 - AnkiPH - INFO - Update check complete: 2 update(s) available
+2025-12-22 19:06:59 - AnkiPH - INFO - ✓ Access token set (eyJh...6Ntg)
+2025-12-22 19:06:59 - AnkiPH - INFO - AnkiPH v4.0.0 ready
+2025-12-22 19:06:59 - AnkiPH - INFO - ✓ Access token set (eyJh...6Ntg)
+2025-12-22 19:07:38 - AnkiPH - INFO - ✓ Access token set (eyJh...6Ntg)
+2025-12-22 19:07:38 - AnkiPH - INFO - ✓ Access token set (eyJh...6Ntg)
+2025-12-22 19:07:38 - AnkiPH - INFO - Access token set for sync
+2025-12-22 19:07:38 - AnkiPH - INFO - ✓ Access token set (eyJh...6Ntg)
+2025-12-22 19:07:40 - AnkiPH - INFO - Checking progress for 2 tracked deck(s)...
+2025-12-22 19:07:40 - AnkiPH - ERROR - Error getting deck stats for 1766392260945: Your database appears to be in an inconsistent state. Please use the Check Database action. No such deck: '1766392260945'
+2025-12-22 19:07:40 - AnkiPH - WARNING - No stats for deck adc78e04-dd8c-40b5-857c-7ee0c214c8f5, using defaults...
+2025-12-22 19:07:40 - AnkiPH - ERROR - Error getting review stats for deck 1766392260945: Your database appears to be in an inconsistent state. Please use the Check Database action. No such deck: '1766392260945'
+2025-12-22 19:07:40 - AnkiPH - ERROR - Error calculating retention rate for deck 1766392260945: Your database appears to be in an inconsistent state. Please use the Check Database action. No such deck: '1766392260945'
+2025-12-22 19:07:40 - AnkiPH - ERROR - Error calculating streak for deck 1766392260945: Your database appears to be in an inconsistent state. Please use the Check Database action. No such deck: '1766392260945'
+2025-12-22 19:07:40 - AnkiPH - INFO - Prepared progress data for deck adc78e04-dd8c-40b5-857c-7ee0c214c8f5
+2025-12-22 19:07:40 - AnkiPH - ERROR - Error getting deck stats for 1766392257971: Your database appears to be in an inconsistent state. Please use the Check Database action. No such deck: '1766392257971'
+2025-12-22 19:07:40 - AnkiPH - WARNING - No stats for deck e857a9e5-4f15-43ec-beb9-8cbf034d811b, using defaults...
+2025-12-22 19:07:40 - AnkiPH - ERROR - Error getting review stats for deck 1766392257971: Your database appears to be in an inconsistent state. Please use the Check Database action. No such deck: '1766392257971'
+2025-12-22 19:07:40 - AnkiPH - ERROR - Error calculating retention rate for deck 1766392257971: Your database appears to be in an inconsistent state. Please use the Check Database action. No such deck: '1766392257971'
+2025-12-22 19:07:40 - AnkiPH - ERROR - Error calculating streak for deck 1766392257971: Your database appears to be in an inconsistent state. Please use the Check Database action. No such deck: '1766392257971'
+2025-12-22 19:07:40 - AnkiPH - INFO - Prepared progress data for deck e857a9e5-4f15-43ec-beb9-8cbf034d811b
+2025-12-22 19:07:40 - AnkiPH - INFO - Syncing progress for 2 deck(s)...
+2025-12-22 19:12:32 - AnkiPH - INFO - ✓ Access token set (eyJh...6Ntg)
+2025-12-22 19:12:32 - AnkiPH - INFO - AnkiPH v4.0.0 ready
+2025-12-22 19:12:32 - AnkiPH - INFO - ✓ Access token set (eyJh...6Ntg)
+2025-12-22 19:31:51 - AnkiPH - INFO - ✓ Access token set (eyJh...6Ntg)
+2025-12-22 19:31:51 - AnkiPH - INFO - AnkiPH v4.0.0 ready
+2025-12-22 19:31:51 - AnkiPH - INFO - ✓ Access token set (eyJh...6Ntg)
+2025-12-22 19:33:15 - AnkiPH - INFO - ✓ Access token set (eyJh...6Ntg)
+2025-12-22 19:33:15 - AnkiPH - INFO - AnkiPH v4.0.0 ready
+2025-12-22 19:33:15 - AnkiPH - INFO - ✓ Access token set (eyJh...6Ntg)
+2025-12-22 19:33:23 - AnkiPH - INFO - ✓ Access token cleared
+2025-12-22 19:33:38 - AnkiPH - ERROR - Authentication error on /addon-login: Invalid email or password
+2025-12-22 19:33:48 - AnkiPH - INFO - ✓ Access token set (eyJh...AdTw)
+2025-12-22 19:33:48 - AnkiPH - INFO - ✓ Access token set (eyJh...AdTw)
+2025-12-22 19:34:10 - AnkiPH - INFO - ✓ Access token set (eyJh...AdTw)
+2025-12-22 19:34:12 - AnkiPH - INFO - Synced subscription: Nottorney Deck
+2025-12-22 19:34:23 - AnkiPH - INFO - ✓ Access token set (eyJh...AdTw)
+2025-12-22 19:34:25 - AnkiPH - INFO - Starting import for deck: Getting Started with Anki
+2025-12-22 19:34:25 - AnkiPH - WARNING - No cards found in deck data
+2025-12-22 19:34:25 - AnkiPH - INFO - ✓ Access token set (eyJh...AdTw)
+2025-12-22 19:34:34 - AnkiPH - INFO - ✓ Access token set (eyJh...AdTw)
+2025-12-22 19:34:39 - AnkiPH - INFO - Starting import for deck: Getting Started with Anki
+2025-12-22 19:34:39 - AnkiPH - WARNING - No cards found in deck data
+2025-12-22 19:34:39 - AnkiPH - INFO - ✓ Access token set (eyJh...AdTw)
+2025-12-22 19:34:46 - AnkiPH - INFO - ✓ Access token set (eyJh...AdTw)
+2025-12-22 19:34:54 - AnkiPH - INFO - ✓ Access token set (eyJh...AdTw)
+2025-12-22 19:34:56 - AnkiPH - INFO - Starting import for deck: Getting Started with Anki
+2025-12-22 19:34:56 - AnkiPH - WARNING - No cards found in deck data
+2025-12-22 19:34:56 - AnkiPH - INFO - ✓ Access token set (eyJh...AdTw)
+2025-12-22 19:35:11 - AnkiPH - INFO - ✓ Access token set (eyJh...AdTw)
+2025-12-22 19:35:19 - AnkiPH - INFO - ✓ Access token set (eyJh...AdTw)
+2025-12-22 19:35:21 - AnkiPH - INFO - Starting import for deck: Getting Started with Anki
+2025-12-22 19:35:21 - AnkiPH - WARNING - No cards found in deck data
+2025-12-22 19:35:21 - AnkiPH - INFO - ✓ Access token set (eyJh...AdTw)
